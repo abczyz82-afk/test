@@ -3,3 +3,6 @@ pandas>=2.0.0
 numpy>=1.25.0
 plotly>=5.18.0
 requests
+beautifulsoup4
+ipython
+vnstock==0.2.9.2.3
