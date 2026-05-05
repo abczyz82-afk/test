@@ -58,7 +58,7 @@ def fetch_real_ohlcv(symbol: str, tf_minutes: int, days_back: int = 5) -> pd.Dat
         return pd.DataFrame()
 
 # ─────────────────────────────────────────────
-# TÍNH TOÁN TẤT CẢ CHỈ BÁO (THEO YÊU CẦU)
+# TÍNH TOÁN TẤT CẢ CHỈ BÁO
 # ─────────────────────────────────────────────
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     c, h, l, n = df["close"].values, df["high"].values, df["low"].values, len(df)
@@ -74,7 +74,9 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["bb_width"] = (df["bb_upper"] - df["bb_lower"]) / df["bb_mid"]
 
     delta = pd.Series(c).diff()
-    df["rsi"] = 100 - 100 / (1 + delta.clip(lower=0).rolling(14).mean() / (-delta.clip(upper=0)).rolling(14).mean().replace(0, np.nan))
+    # Thêm fillna(50) để bẫy lỗi NaN khi giá đi ngang
+    rs = delta.clip(lower=0).rolling(14).mean() / (-delta.clip(upper=0)).rolling(14).mean().replace(0, np.nan)
+    df["rsi"] = (100 - 100 / (1 + rs)).fillna(50)
 
     df["macd"] = ema(c, 12) - ema(c, 26)
     df["macd_signal"] = ema(np.nan_to_num(df["macd"].values), 9)
@@ -118,7 +120,7 @@ def detect_regime(df: pd.DataFrame) -> dict:
     elif di_pos > di_neg: regime, strength = "UPTREND", "MẠNH" if adx > 35 else "VỪA"
     else: regime, strength = "DOWNTREND", "MẠNH" if adx > 35 else "VỪA"
 
-    # Tổng hợp 5 loại Tín hiệu
+    # Tổng hợp Tín hiệu
     signals = []
     if ema9 > ema21 > ema50: signals.append(("🟢", "EMA Cross (LONG)", "BUY"))
     elif ema9 < ema21 < ema50: signals.append(("🔴", "EMA Cross (SHORT)", "SELL"))
@@ -133,7 +135,8 @@ def detect_regime(df: pd.DataFrame) -> dict:
     if len(hist_bb_w) > 10 and bb_w < hist_bb_w.quantile(0.15):
         signals.append(("⚡", "BB Squeeze (Nén giá)", "WATCH"))
 
-    return {"regime": regime, "strength": strength, "adx": adx, "di_pos": di_pos, "di_neg": di_neg, "rsi": rsi, "signals": signals}
+    # ĐÃ SỬA LỖI Ở ĐÂY: Trả về đầy đủ ema9 và ema21
+    return {"regime": regime, "strength": strength, "adx": adx, "di_pos": di_pos, "di_neg": di_neg, "rsi": rsi, "ema9": ema9, "ema21": ema21, "signals": signals}
 
 # ─────────────────────────────────────────────
 # BIỂU ĐỒ NẾN + TOGGLE BẬT TẮT CHỈ BÁO
