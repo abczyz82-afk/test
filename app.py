@@ -4,8 +4,9 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
-import requests
+from vnstock import stock_historical_data
 import time
+import random
 
 # ─────────────────────────────────────────────
 # PAGE CONFIG
@@ -67,42 +68,23 @@ if "last_refresh" not in st.session_state:
 
 
 # ─────────────────────────────────────────────
-# REAL DATA CONNECTION – API SSI (THAY THẾ HÀM GIẢ LẬP)
+# REAL DATA CONNECTION – DÙNG VNSTOCK ĐỂ LÁCH TƯỜNG LỬA
 # ─────────────────────────────────────────────
-@st.cache_data(ttl=5) # Cache nhỏ 5 giây để tránh bị SSI block vì spam
+@st.cache_data(ttl=30, show_spinner=False)
 def fetch_real_ohlcv(symbol: str, tf_minutes: int, days_back: int = 5) -> pd.DataFrame:
-    url = "https://iboard.ssi.com.vn/dchart/api/1.1/chart/history"
-    now = int(time.time())
-    from_time = now - (days_back * 24 * 60 * 60)
-    
-    params = {
-        "symbol": symbol,
-        "resolution": str(tf_minutes),
-        "from": from_time,
-        "to": now
-    }
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    
     try:
-        r = requests.get(url, params=params, headers=headers)
-        data = r.json()
+        today = datetime.now().strftime("%Y-%m-%d")
+        start_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
         
-        if data.get("s") == "ok":
-            # Chuyển đổi dữ liệu JSON từ SSI sang DataFrame chuẩn của Pandas
-            df = pd.DataFrame({
-                "time": [datetime.fromtimestamp(t) for t in data["t"]],
-                "open": data["o"],
-                "high": data["h"],
-                "low": data["l"],
-                "close": data["c"],
-                "volume": data["v"]
-            })
+        # Gọi vnstock lấy dữ liệu phái sinh
+        df = stock_historical_data(symbol=symbol, start_date=start_date, end_date=today, resolution=str(tf_minutes), type='derivative')
+        
+        if df is not None and not df.empty:
+            df = df.sort_values(by='time').reset_index(drop=True)
+            df['time'] = pd.to_datetime(df['time'])
             return df.set_index("time")
-        else:
-            return pd.DataFrame() # Trả về rỗng nếu lỗi
-    except:
+        return pd.DataFrame()
+    except Exception as e:
         return pd.DataFrame()
 
 
@@ -325,7 +307,6 @@ with st.sidebar:
     st.markdown('<div style="font-family:JetBrains Mono;font-size:18px;font-weight:700;color:#38bdf8;padding:8px 0 16px">⚡ VN30F TERMINAL PRO</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="section-header">⚙️ CÀI ĐẶT</div>', unsafe_allow_html=True)
-    # Đã sửa lại thành VN30F1M chuẩn chỉnh
     symbol = st.selectbox("Hợp đồng", ["VN30F1M", "VN30F1Q", "VN30F2Q"], index=0)
     auto_refresh = st.toggle("🔄 Tự động cập nhật", value=True)
     refresh_sec  = st.slider("Chu kỳ (giây)", 10, 120, 30) if auto_refresh else 30
@@ -336,18 +317,17 @@ with st.sidebar:
     sl_points = st.number_input("SL (điểm)", min_value=1.0, max_value=30.0, value=4.0, step=0.5)
     
     st.markdown("---")
-    st.markdown('<div style="font-size:10px;color:#00e676;font-family:JetBrains Mono">🟢 Đang kết nối trực tiếp API SSI</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:10px;color:#00e676;font-family:JetBrains Mono">🟢 Đang kết nối API qua Vnstock</div>', unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────
-# BUILD DATA TỪ API SSI THỰC
+# BUILD DATA TỪ VNSTOCK
 # ─────────────────────────────────────────────
 df1 = fetch_real_ohlcv(symbol, tf_minutes=1, days_back=3)
 df5 = fetch_real_ohlcv(symbol, tf_minutes=5, days_back=7)
 
-# Kiểm tra nếu API lỗi hoặc ngoài giờ
 if df1.empty or df5.empty:
-    st.error("❌ Không lấy được dữ liệu từ SSI. Hãy kiểm tra lại kết nối mạng hoặc thử lại sau.")
+    st.error("❌ Không lấy được dữ liệu. Có thể do ngoài giờ giao dịch, nghỉ lễ hoặc API đang bảo trì.")
     st.stop()
 
 df1 = add_indicators(df1)
