@@ -129,27 +129,23 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     c, h, l, n = df["close"].values, df["high"].values, df["low"].values, len(df)
 
     def ema(arr, p):
-        n = len(arr)
-        r = np.full(n, np.nan)
-
-        if n == 0:
+        length = len(arr)
+        r = np.full(length, np.nan)
+        if length == 0:
             return r
-
+            
         k = 2 / (p + 1)
-
-        if n < p:
-            # Fallback: Không đủ nến, mượn giá trị nến đầu tiên làm điểm bắt đầu
+        
+        if length < p:
             r[0] = arr[0]
             start_idx = 1
         else:
-            # Chuẩn xác: Lấy giá trị trung bình của p nến đầu tiên làm điểm bắt đầu
             r[p-1] = arr[:p].mean()
             start_idx = p
-
-        # Tính EMA cho các nến tiếp theo
-        for i in range(start_idx, n):
+            
+        for i in range(start_idx, length): 
             r[i] = arr[i] * k + r[i-1] * (1 - k)
-
+            
         return r
 
     # EMAs
