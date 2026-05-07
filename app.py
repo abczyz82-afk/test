@@ -571,60 +571,70 @@ def compute_forecast(df1: pd.DataFrame, df5: pd.DataFrame) -> dict:
 
     return {"factors": factors, "up_score": up_score, "down_score": down_score, "up_prob": up_prob, "down_prob": down_prob, "verdict": verdict, "verdict_color": verdict_color, "verdict_desc": verdict_desc}
 
-def backtest_ai(df: pd.DataFrame, atr_sl_mult=1.0) -> list:
-    trades = []
-    in_trade = False
-    entry_price = 0.0
-    sl = 0.0; tp = 0.0
-    direction = ""
-    entry_time = None
+def backtest_ai(df: pd.DataFrame, atr_sl_mult=1.0) -> tuple:
+    trades_ai1 = []
+    trades_ai2 = []
+    
+    in_trade1 = False; dir1 = ""; ep1 = 0.0; sl1 = 0.0; tp1 = 0.0; et1 = None
+    in_trade2 = False; dir2 = ""; ep2 = 0.0; sl2 = 0.0; tp2 = 0.0; et2 = None
     
     for i in range(50, len(df)):
         row = df.iloc[i]
         
-        if in_trade:
-            if direction == "LONG":
-                if row["low"] <= sl:
-                    trades.append({"entry_time": entry_time, "exit_time": row.name, "direction": direction, "entry": entry_price, "exit": sl, "pnl_points": sl - entry_price, "reason": "Dính SL", "score": "-"})
-                    in_trade = False
-                elif row["high"] >= tp:
-                    trades.append({"entry_time": entry_time, "exit_time": row.name, "direction": direction, "entry": entry_price, "exit": tp, "pnl_points": tp - entry_price, "reason": "Chốt lời (Dynamic TP)", "score": "-"})
-                    in_trade = False
+        # ----------------- AI 1.0 (SMC Reversal) -----------------
+        if in_trade1:
+            if dir1 == "LONG":
+                if row["low"] <= sl1: trades_ai1.append({"entry_time": et1, "exit_time": row.name, "direction": dir1, "entry": ep1, "exit": sl1, "pnl_points": sl1 - ep1, "reason": "Dính SL", "score": "-"}); in_trade1 = False
+                elif row["high"] >= tp1: trades_ai1.append({"entry_time": et1, "exit_time": row.name, "direction": dir1, "entry": ep1, "exit": tp1, "pnl_points": tp1 - ep1, "reason": "Chốt lời (Dynamic TP)", "score": "-"}); in_trade1 = False
             else:
-                if row["high"] >= sl:
-                    trades.append({"entry_time": entry_time, "exit_time": row.name, "direction": direction, "entry": entry_price, "exit": sl, "pnl_points": entry_price - sl, "reason": "Dính SL", "score": "-"})
-                    in_trade = False
-                elif row["low"] <= tp:
-                    trades.append({"entry_time": entry_time, "exit_time": row.name, "direction": direction, "entry": entry_price, "exit": tp, "pnl_points": entry_price - tp, "reason": "Chốt lời (Dynamic TP)", "score": "-"})
-                    in_trade = False
-            continue
+                if row["high"] >= sl1: trades_ai1.append({"entry_time": et1, "exit_time": row.name, "direction": dir1, "entry": ep1, "exit": sl1, "pnl_points": ep1 - sl1, "reason": "Dính SL", "score": "-"}); in_trade1 = False
+                elif row["low"] <= tp1: trades_ai1.append({"entry_time": et1, "exit_time": row.name, "direction": dir1, "entry": ep1, "exit": tp1, "pnl_points": ep1 - tp1, "reason": "Chốt lời (Dynamic TP)", "score": "-"}); in_trade1 = False
+        else:
+            ob_bull = float(row.get("ob_bull", 0)) == 1.0; fvg_bull = float(row.get("fvg_bull", 0)) == 1.0
+            ob_bear = float(row.get("ob_bear", 0)) == 1.0; fvg_bear = float(row.get("fvg_bear", 0)) == 1.0
+            rsi = float(row.get("rsi", 50)); adx = float(row.get("adx", 20))
+            vol_spike = float(row.get("volume", 0)) > float(row.get("vol_ma", 1)) * 1.5
+            rg = row["high"] - row["low"] + 1e-9
+            lw_ratio = (min(row["open"], row["close"]) - row["low"]) / rg
+            uw_ratio = (row["high"] - max(row["open"], row["close"])) / rg
+            atr = float(row.get("atr", 4.0))
             
-        ob_bull = float(row.get("ob_bull", 0)) == 1.0; fvg_bull = float(row.get("fvg_bull", 0)) == 1.0
-        ob_bear = float(row.get("ob_bear", 0)) == 1.0; fvg_bear = float(row.get("fvg_bear", 0)) == 1.0
-        rsi = float(row.get("rsi", 50)); adx = float(row.get("adx", 20))
-        vol_spike = float(row.get("volume", 0)) > float(row.get("vol_ma", 1)) * 1.5
-        rg = row["high"] - row["low"] + 1e-9
-        lw_ratio = (min(row["open"], row["close"]) - row["low"]) / rg
-        uw_ratio = (row["high"] - max(row["open"], row["close"])) / rg
-        
-        if (ob_bull or fvg_bull) and rsi < 70 and vol_spike and lw_ratio > 0.4:
-            in_trade = True; direction = "LONG"; entry_price = row["close"]; entry_time = row.name
-            atr = float(row.get("atr", 4.0)); sl = entry_price - atr * atr_sl_mult
-            tp_mult = 3.0 if adx > 35 else (2.0 if adx > 25 else 1.0)
-            tp = entry_price + atr * tp_mult
-            
-        elif (ob_bear or fvg_bear) and rsi > 30 and vol_spike and uw_ratio > 0.4:
-            in_trade = True; direction = "SHORT"; entry_price = row["close"]; entry_time = row.name
-            atr = float(row.get("atr", 4.0)); sl = entry_price + atr * atr_sl_mult
-            tp_mult = 3.0 if adx > 35 else (2.0 if adx > 25 else 1.0)
-            tp = entry_price - atr * tp_mult
+            if (ob_bull or fvg_bull) and rsi < 70 and vol_spike and lw_ratio > 0.4:
+                in_trade1 = True; dir1 = "LONG"; ep1 = row["close"]; et1 = row.name
+                sl1 = ep1 - atr * atr_sl_mult; tp1 = ep1 + atr * (3.0 if adx > 35 else (2.0 if adx > 25 else 1.0))
+            elif (ob_bear or fvg_bear) and rsi > 30 and vol_spike and uw_ratio > 0.4:
+                in_trade1 = True; dir1 = "SHORT"; ep1 = row["close"]; et1 = row.name
+                sl1 = ep1 + atr * atr_sl_mult; tp1 = ep1 - atr * (3.0 if adx > 35 else (2.0 if adx > 25 else 1.0))
 
-    if in_trade:
-        last = df.iloc[-1]
-        pts = (last["close"] - entry_price) * (1 if direction=="LONG" else -1)
-        trades.append({"entry_time": entry_time, "exit_time": last.name, "direction": direction, "entry": entry_price, "exit": last["close"], "pnl_points": pts, "reason": "Đóng cuối phiên", "score": "-"})
+        # ----------------- AI 2.0 (Trend Following + VN30 Anomaly) -----------------
+        if in_trade2:
+            if dir2 == "LONG":
+                if row["low"] <= sl2: trades_ai2.append({"entry_time": et2, "exit_time": row.name, "direction": dir2, "entry": ep2, "exit": sl2, "pnl_points": sl2 - ep2, "reason": "Dính SL", "score": "-"}); in_trade2 = False
+                elif row["high"] >= tp2: trades_ai2.append({"entry_time": et2, "exit_time": row.name, "direction": dir2, "entry": ep2, "exit": tp2, "pnl_points": tp2 - ep2, "reason": "Chốt lời (Dynamic TP)", "score": "-"}); in_trade2 = False
+            else:
+                if row["high"] >= sl2: trades_ai2.append({"entry_time": et2, "exit_time": row.name, "direction": dir2, "entry": ep2, "exit": sl2, "pnl_points": ep2 - sl2, "reason": "Dính SL", "score": "-"}); in_trade2 = False
+                elif row["low"] <= tp2: trades_ai2.append({"entry_time": et2, "exit_time": row.name, "direction": dir2, "entry": ep2, "exit": tp2, "pnl_points": ep2 - tp2, "reason": "Chốt lời (Dynamic TP)", "score": "-"}); in_trade2 = False
+        else:
+            bb_upper = float(row.get("bb_upper", 9999)); bb_lower = float(row.get("bb_lower", 0))
+            macd_slope = float(row.get("macd_slope", 0))
+            body = row["close"] - row["open"]
+            vol_spike = float(row.get("volume", 0)) > float(row.get("vol_ma", 1)) * 1.5
+            atr = float(row.get("atr", 4.0)); adx = float(row.get("adx", 20))
+            
+            vn30_bull_anomaly = body > 3.5 and vol_spike
+            vn30_bear_anomaly = body < -3.5 and vol_spike
+            
+            if (row["close"] > bb_upper or vn30_bull_anomaly) and macd_slope > 0.05 and adx > 25:
+                in_trade2 = True; dir2 = "LONG"; ep2 = row["close"]; et2 = row.name
+                sl2 = ep2 - atr * atr_sl_mult; tp2 = ep2 + atr * (3.0 if adx > 35 else (2.0 if adx > 25 else 1.0))
+            elif (row["close"] < bb_lower or vn30_bear_anomaly) and macd_slope < -0.05 and adx > 25:
+                in_trade2 = True; dir2 = "SHORT"; ep2 = row["close"]; et2 = row.name
+                sl2 = ep2 + atr * atr_sl_mult; tp2 = ep2 - atr * (3.0 if adx > 35 else (2.0 if adx > 25 else 1.0))
+
+    if in_trade1: trades_ai1.append({"entry_time": et1, "exit_time": df.iloc[-1].name, "direction": dir1, "entry": ep1, "exit": df.iloc[-1]["close"], "pnl_points": (df.iloc[-1]["close"] - ep1) * (1 if dir1=="LONG" else -1), "reason": "Đóng cuối phiên", "score": "-"})
+    if in_trade2: trades_ai2.append({"entry_time": et2, "exit_time": df.iloc[-1].name, "direction": dir2, "entry": ep2, "exit": df.iloc[-1]["close"], "pnl_points": (df.iloc[-1]["close"] - ep2) * (1 if dir2=="LONG" else -1), "reason": "Đóng cuối phiên", "score": "-"})
         
-    return trades
+    return trades_ai1, trades_ai2
 
 def compute_winrate() -> dict:
     closed = [t for t in st.session_state.trade_history if t["status"] == "CLOSED"]
@@ -1166,61 +1176,55 @@ with chart_col:
         </div>""", unsafe_allow_html=True)
 
     with tab_ai:
-        st.markdown('<div class="sec-hdr">🧠 NHẬT KÝ MARKET MAKER & LỆNH AI</div>', unsafe_allow_html=True)
-        st.markdown('<div style="font-size:11px;color:#94a3b8;margin-bottom:12px">Bảng điện tư duy của AI khi quét thanh khoản (Liquidity) và tìm kiếm dấu chân Cá mập. Lịch sử này được lưu vĩnh viễn.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sec-hdr">🧠 SO SÁNH HIỆU SUẤT: AI 1.0 vs AI 2.0</div>', unsafe_allow_html=True)
+        st.markdown('<div style="font-size:11px;color:#94a3b8;margin-bottom:12px">Bảng điện đánh giá độc lập thuật toán bắt đỉnh/đáy (AI 1.0) và thuật toán bắt sóng/breakout (AI 2.0)</div>', unsafe_allow_html=True)
         
-        if not st.session_state.ai_journal:
-            st.info("AI chưa phát hiện dấu chân của Market Maker.")
-        else:
-            for note in st.session_state.ai_journal:
+        sim_ai1, sim_ai2 = backtest_ai(df1)
+        
+        c_ai1, c_ai2 = st.columns(2)
+        with c_ai1:
+            st.markdown('<div class="sec-hdr" style="color:#a78bfa">🛡️ AI 1.0 (BẮT ĐỈNH/ĐÁY)</div>', unsafe_allow_html=True)
+            ai1_live = [t for t in st.session_state.trade_history if t["signal_tag"] == "[AI 1.0]" and t["status"] == "CLOSED"]
+            if ai1_live:
+                st.markdown('<b style="font-size:11px;color:#00e676">Lệnh Đã Đóng (Real)</b>', unsafe_allow_html=True)
+                wr1 = len([t for t in ai1_live if t.get("pnl_points",0)>0]) / len(ai1_live) * 100
+                st.markdown(f"<div style='font-size:11px;margin-bottom:8px'>Win Rate: <b>{wr1:.1f}%</b> | P&L: <b>{sum(t.get('pnl_points',0) for t in ai1_live):+.1f}đ</b></div>", unsafe_allow_html=True)
+            
+            if sim_ai1:
+                st.markdown('<div style="margin-top:10px;font-size:11px;color:#38bdf8"><b>Mô Phỏng Lịch Sử (Backtest)</b></div>', unsafe_allow_html=True)
+                swr1 = len([t for t in sim_ai1 if t.get("pnl_points",0)>0]) / len(sim_ai1) * 100
+                st.markdown(f"<div style='font-size:11px;margin-bottom:8px'>Win Rate: <b>{swr1:.1f}%</b> | Lệnh: <b>{len(sim_ai1)}</b> | P&L: <b>{sum(t.get('pnl_points',0) for t in sim_ai1):+.1f}đ</b></div>", unsafe_allow_html=True)
+                rows1 = [{"Time": t['entry_time'].strftime("%d/%m %H:%M") if pd.notnull(t['entry_time']) else "-", "Dir": t["direction"], "P&L": f"{t['pnl_points']:+.1f}"} for t in sim_ai1]
+                st.dataframe(pd.DataFrame(rows1), use_container_width=True, hide_index=True)
+
+        with c_ai2:
+            st.markdown('<div class="sec-hdr" style="color:#f59e0b">🚀 AI 2.0 (BẮT SÓNG LỚN)</div>', unsafe_allow_html=True)
+            ai2_live = [t for t in st.session_state.trade_history if t["signal_tag"] == "[AI 2.0]" and t["status"] == "CLOSED"]
+            if ai2_live:
+                st.markdown('<b style="font-size:11px;color:#00e676">Lệnh Đã Đóng (Real)</b>', unsafe_allow_html=True)
+                wr2 = len([t for t in ai2_live if t.get("pnl_points",0)>0]) / len(ai2_live) * 100
+                st.markdown(f"<div style='font-size:11px;margin-bottom:8px'>Win Rate: <b>{wr2:.1f}%</b> | P&L: <b>{sum(t.get('pnl_points',0) for t in ai2_live):+.1f}đ</b></div>", unsafe_allow_html=True)
+            
+            if sim_ai2:
+                st.markdown('<div style="margin-top:10px;font-size:11px;color:#38bdf8"><b>Mô Phỏng Lịch Sử (Backtest)</b></div>', unsafe_allow_html=True)
+                swr2 = len([t for t in sim_ai2 if t.get("pnl_points",0)>0]) / len(sim_ai2) * 100
+                st.markdown(f"<div style='font-size:11px;margin-bottom:8px'>Win Rate: <b>{swr2:.1f}%</b> | Lệnh: <b>{len(sim_ai2)}</b> | P&L: <b>{sum(t.get('pnl_points',0) for t in sim_ai2):+.1f}đ</b></div>", unsafe_allow_html=True)
+                rows2 = [{"Time": t['entry_time'].strftime("%d/%m %H:%M") if pd.notnull(t['entry_time']) else "-", "Dir": t["direction"], "P&L": f"{t['pnl_points']:+.1f}"} for t in sim_ai2]
+                st.dataframe(pd.DataFrame(rows2), use_container_width=True, hide_index=True)
+                
+        st.markdown('<div class="sec-hdr" style="margin-top:20px">📜 NHẬT KÝ RA QUYẾT ĐỊNH</div>', unsafe_allow_html=True)
+        if st.session_state.ai_journal:
+            for note in st.session_state.ai_journal[:15]:
                 c = "#00e676" if "LONG" in note["action"] else "#ff5252"
+                v = "1.0" if "1.0" in note["action"] else "2.0"
                 st.markdown(f"""
-                <div style="background:#0f1626;border-left:3px solid {c};border-radius:4px;padding:10px;margin-bottom:6px;font-family:'JetBrains Mono';font-size:11px">
-                  <div style="display:flex;justify-content:space-between">
-                    <span style="color:{c};font-weight:700">{note['action']} @ {note['price']:.1f}</span>
-                    <span style="color:#64748b">{note['date']} {note['time']}</span>
-                  </div>
-                  <div style="color:#dde4f0;margin-top:6px">{note['reason']}</div>
-                  <div style="color:#38bdf8;margin-top:4px;font-size:10px">Confluence Score: {note['score']:+d}</div>
+                <div style="background:#0f1626;border-left:3px solid {c};border-radius:4px;padding:8px;margin-bottom:6px;font-family:'JetBrains Mono';font-size:11px">
+                  <div style="color:{c};font-weight:700">[{v}] {note['action']} @ {note['price']:.1f} <span style="float:right;color:#64748b">{note['time']}</span></div>
+                  <div style="color:#dde4f0;margin-top:4px">{note['reason']}</div>
                 </div>
                 """, unsafe_allow_html=True)
-                
-        st.markdown('<div class="sec-hdr" style="margin-top:20px">📈 HIỆU SUẤT CỦA AI</div>', unsafe_allow_html=True)
-        ai_trades = [t for t in st.session_state.trade_history if t["signal_tag"] == "[AI Đánh]" and t["status"] == "CLOSED"]
-        if ai_trades:
-            wins = [t for t in ai_trades if t.get("pnl_points", 0) > 0]
-            wr = len(wins) / len(ai_trades) * 100
-            total_pnl = sum(t.get("pnl_points", 0) for t in ai_trades)
-            st.markdown(f"""
-            <div style="display:flex;gap:12px;margin-bottom:12px;font-family:'JetBrains Mono';font-size:12px">
-              <div class="metric-box" style="flex:1">Tổng Lệnh<br><b style="color:#38bdf8;font-size:18px">{len(ai_trades)}</b></div>
-              <div class="metric-box" style="flex:1">Win Rate<br><b style="color:{'#00e676' if wr>=50 else '#ff5252'};font-size:18px">{wr:.1f}%</b></div>
-              <div class="metric-box" style="flex:1">Tổng P&L<br><b style="color:{'#00e676' if total_pnl>=0 else '#ff5252'};font-size:18px">{total_pnl:+.1f}đ</b></div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            rows = [{"Vào": f"{t['date']} {t['time']}", "Lệnh": "LONG" if t["direction"]=="LONG" else "SHORT", "Entry": t["entry"], "Exit": t["exit_price"], "P&L": f"{t['pnl_points']:+.1f}", "Score": t["score"]} for t in ai_trades]
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-        st.markdown('<div class="sec-hdr" style="margin-top:20px">🤖 LỊCH SỬ AI TỰ ĐÁNH (BACKTEST MÔ PHỎNG)</div>', unsafe_allow_html=True)
-        st.markdown('<div style="font-size:11px;color:#94a3b8;margin-bottom:12px">Bảng dưới đây mô phỏng lại các lệnh AI SẼ VÀO trong quá khứ. Hệ thống tự động chọn TP1/TP2/TP3 dựa trên ADX (Độ mạnh xu hướng).</div>', unsafe_allow_html=True)
-        
-        sim_trades = backtest_ai(df1)
-        if sim_trades:
-            sim_wins = [t for t in sim_trades if t.get("pnl_points", 0) > 0]
-            sim_wr = len(sim_wins) / len(sim_trades) * 100
-            sim_pnl = sum(t.get("pnl_points", 0) for t in sim_trades)
-            st.markdown(f"""
-            <div style="display:flex;gap:12px;margin-bottom:12px;font-family:'JetBrains Mono';font-size:12px">
-              <div class="metric-box" style="flex:1">Lệnh Mô Phỏng<br><b style="color:#a78bfa;font-size:18px">{len(sim_trades)}</b></div>
-              <div class="metric-box" style="flex:1">Win Rate (Sim)<br><b style="color:{'#00e676' if sim_wr>=50 else '#ff5252'};font-size:18px">{sim_wr:.1f}%</b></div>
-              <div class="metric-box" style="flex:1">Tổng P&L (Sim)<br><b style="color:{'#00e676' if sim_pnl>=0 else '#ff5252'};font-size:18px">{sim_pnl:+.1f}đ</b></div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            sim_rows = [{"Vào (Sim)": t['entry_time'].strftime("%d/%m %H:%M") if pd.notnull(t['entry_time']) else "-", "Lệnh": "LONG" if t["direction"]=="LONG" else "SHORT", "Entry": f"{t['entry']:.1f}", "Exit": f"{t['exit']:.1f}", "P&L": f"{t['pnl_points']:+.1f}", "Kết quả": t["reason"]} for t in sim_trades]
-            st.dataframe(pd.DataFrame(sim_rows), use_container_width=True, hide_index=True)
         else:
-            st.markdown('<div style="font-size:11px;color:#475569">Không có dữ liệu mô phỏng trong quá khứ gần đây.</div>', unsafe_allow_html=True)
+            st.info("Chưa có ghi chú nào từ AI.")
 
 with trade_col:
     st.markdown('<div class="sec-hdr">🔫 VÀO LỆNH & QUẢN LÝ</div>', unsafe_allow_html=True)
@@ -1237,6 +1241,7 @@ with trade_col:
     open_exist = any(t["status"] == "OPEN" for t in st.session_state.trade_history)
 
     if ai_enabled and is_trading_hours() and not open_exist:
+        # AI 1.0 (SMC Reversal)
         ob_bull = float(df1["ob_bull"].iloc[-1]) == 1.0 if "ob_bull" in df1.columns else False
         fvg_bull = float(df1["fvg_bull"].iloc[-1]) == 1.0 if "fvg_bull" in df1.columns else False
         ob_bear = float(df1["ob_bear"].iloc[-1]) == 1.0 if "ob_bear" in df1.columns else False
@@ -1246,22 +1251,41 @@ with trade_col:
         rg = df1["high"].iloc[-1] - df1["low"].iloc[-1] + 1e-9
         lw_ratio = (min(df1["open"].iloc[-1], df1["close"].iloc[-1]) - df1["low"].iloc[-1]) / rg
         uw_ratio = (df1["high"].iloc[-1] - max(df1["open"].iloc[-1], df1["close"].iloc[-1])) / rg
+        adx_val = regime5["adx"]
         
-        if score >= 70 and (ob_bull or fvg_bull) and rsi_val < 70 and vol_spike and lw_ratio > 0.4:
-            adx_val = regime5["adx"]
-            tp_target = "TP3" if adx_val > 35 else ("TP2" if adx_val > 25 else "TP1")
-            actual_tp = calc_tp3 if adx_val > 35 else (calc_tp2 if adx_val > 25 else calc_tp1)
-            reason = f"Phát hiện {'Order Block' if ob_bull else 'FVG'} TĂNG có Volume lớn + Rút chân dưới (Price Rejection). Trend ADX={adx_val:.1f} chọn {tp_target}."
-            st.session_state.ai_journal.insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "date": datetime.now().strftime("%d/%m/%Y"), "action": "Vào LONG", "reason": reason, "price": current_price, "score": score})
-            add_trade("LONG", current_price, current_price+actual_tp, current_price+actual_tp, current_price+actual_tp, current_price-calc_sl, calc_lot_size, score, regime5["regime"], "[AI Đánh]")
+        # AI 2.0 (Trend & Breakout + VN30 Anomaly Proxy)
+        bb_upper = float(df1["bb_upper"].iloc[-1]) if "bb_upper" in df1.columns else 9999
+        bb_lower = float(df1["bb_lower"].iloc[-1]) if "bb_lower" in df1.columns else 0
+        macd_slope = float(df1["macd_slope"].iloc[-1]) if "macd_slope" in df1.columns else 0
+        body = df1["close"].iloc[-1] - df1["open"].iloc[-1]
+        
+        vn30_bull_anomaly = body > 3.5 and vol_spike
+        vn30_bear_anomaly = body < -3.5 and vol_spike
+        trend_bull = (current_price > bb_upper or vn30_bull_anomaly) and macd_slope > 0.05 and adx_val > 25
+        trend_bear = (current_price < bb_lower or vn30_bear_anomaly) and macd_slope < -0.05 and adx_val > 25
+
+        tp_target = "TP3" if adx_val > 35 else ("TP2" if adx_val > 25 else "TP1")
+        actual_tp = calc_tp3 if adx_val > 35 else (calc_tp2 if adx_val > 25 else calc_tp1)
+
+        if trend_bull:
+            reason = "Breakout dải trên BB hoặc VN30 Anomaly (Vol siêu lớn). Trend dốc. AI 2.0 bắt sóng LONG."
+            st.session_state.ai_journal.insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "date": datetime.now().strftime("%d/%m/%Y"), "action": "Vào LONG [AI 2.0]", "reason": reason, "price": current_price, "score": score})
+            add_trade("LONG", current_price, current_price+actual_tp, current_price+actual_tp, current_price+actual_tp, current_price-calc_sl, calc_lot_size, score, regime5["regime"], "[AI 2.0]")
+            st.rerun()
+        elif trend_bear:
+            reason = "Breakout dải dưới BB hoặc VN30 Anomaly (Vol siêu lớn). Trend dốc. AI 2.0 bắt sóng SHORT."
+            st.session_state.ai_journal.insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "date": datetime.now().strftime("%d/%m/%Y"), "action": "Vào SHORT [AI 2.0]", "reason": reason, "price": current_price, "score": score})
+            add_trade("SHORT", current_price, current_price-actual_tp, current_price-actual_tp, current_price-actual_tp, current_price+calc_sl, calc_lot_size, score, regime5["regime"], "[AI 2.0]")
+            st.rerun()
+        elif score >= 70 and (ob_bull or fvg_bull) and rsi_val < 70 and vol_spike and lw_ratio > 0.4:
+            reason = f"Order Block TĂNG + Vol Lớn + Rút chân. Chốt lời tại {tp_target}."
+            st.session_state.ai_journal.insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "date": datetime.now().strftime("%d/%m/%Y"), "action": "Vào LONG [AI 1.0]", "reason": reason, "price": current_price, "score": score})
+            add_trade("LONG", current_price, current_price+actual_tp, current_price+actual_tp, current_price+actual_tp, current_price-calc_sl, calc_lot_size, score, regime5["regime"], "[AI 1.0]")
             st.rerun()
         elif score <= -70 and (ob_bear or fvg_bear) and rsi_val > 30 and vol_spike and uw_ratio > 0.4:
-            adx_val = regime5["adx"]
-            tp_target = "TP3" if adx_val > 35 else ("TP2" if adx_val > 25 else "TP1")
-            actual_tp = calc_tp3 if adx_val > 35 else (calc_tp2 if adx_val > 25 else calc_tp1)
-            reason = f"Phát hiện {'Order Block' if ob_bear else 'FVG'} GIẢM có Volume lớn + Rút chân trên (Price Rejection). Trend ADX={adx_val:.1f} chọn {tp_target}."
-            st.session_state.ai_journal.insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "date": datetime.now().strftime("%d/%m/%Y"), "action": "Vào SHORT", "reason": reason, "price": current_price, "score": score})
-            add_trade("SHORT", current_price, current_price-actual_tp, current_price-actual_tp, current_price-actual_tp, current_price+calc_sl, calc_lot_size, score, regime5["regime"], "[AI Đánh]")
+            reason = f"Order Block GIẢM + Vol Lớn + Rút chân. Chốt lời tại {tp_target}."
+            st.session_state.ai_journal.insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "date": datetime.now().strftime("%d/%m/%Y"), "action": "Vào SHORT [AI 1.0]", "reason": reason, "price": current_price, "score": score})
+            add_trade("SHORT", current_price, current_price-actual_tp, current_price-actual_tp, current_price-actual_tp, current_price+calc_sl, calc_lot_size, score, regime5["regime"], "[AI 1.0]")
             st.rerun()
 
 
