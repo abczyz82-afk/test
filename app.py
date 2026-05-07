@@ -16,7 +16,7 @@ def is_trading_hours():
 # PAGE CONFIG
 # ══════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="VN30F Terminal PRO v4",
+    page_title="VN30F Terminal PRO v5 🧠",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -784,33 +784,62 @@ def build_chart(df, title, show_ema, show_bb, show_signals, show_trades, show_vw
     fig.update_yaxes(row=4,col=1,range=[0,100])
     return fig
 
-def add_trade(direction, entry, tp1, tp2, tp3, sl, size, score=0, regime="", signal_tag="Thủ công"):
-    st.session_state.trade_history.insert(0, {"id": len(st.session_state.trade_history) + 1, "date": datetime.now().strftime("%d/%m/%Y"), "time": datetime.now().strftime("%H:%M:%S"), "exit_time": "-", "direction": direction, "entry": entry, "tp1": tp1, "tp2": tp2, "tp3": tp3, "sl": sl, "size": size, "status": "OPEN", "exit_price": 0.0, "pnl_points": 0.0, "pnl": 0.0, "reason": "-", "score": score, "regime": regime, "signal_tag": signal_tag})
+def add_trade(direction, entry, tp1, tp2, tp3, sl, size, score=0, regime="", signal_tag="Thủ công", atr_val=0):
+    st.session_state.trade_history.insert(0, {
+        "id": len(st.session_state.trade_history) + 1,
+        "date": datetime.now().strftime("%d/%m/%Y"),
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "exit_time": "-", "direction": direction,
+        "entry": entry, "tp1": tp1, "tp2": tp2, "tp3": tp3, "sl": sl,
+        "size": size, "status": "OPEN", "exit_price": 0.0,
+        "pnl_points": 0.0, "pnl": 0.0, "reason": "-",
+        "score": score, "regime": regime, "signal_tag": signal_tag,
+        "atr_at_entry": atr_val
+    })
     save_journal()
 
 def close_trade(idx, exit_price, reason="Đóng thủ công"):
     t = st.session_state.trade_history[idx]
     if t["status"] != "OPEN": return
     pts = (exit_price - t["entry"]) * (1 if t["direction"]=="LONG" else -1)
-    t.update({"status":"CLOSED","exit_price":exit_price,"exit_time":datetime.now().strftime("%H:%M:%S"), "reason":reason,"pnl_points":pts,"pnl":pts*t["size"]*100_000})
+    now_str = datetime.now().strftime("%d/%m %H:%M:%S")
+    t.update({"status":"CLOSED","exit_price":exit_price,"exit_time": now_str, "reason":reason,"pnl_points":pts,"pnl":pts*t["size"]*100_000})
     save_journal()
 
 def auto_check_trades(cp, target_tp):
+    """Kiểm tra và đóng lệnh theo multi-TP và breakeven trailing stop."""
     for i, t in enumerate(st.session_state.trade_history):
-        if t["status"] == "OPEN":
-            tp_val = t[target_tp]
-            if t["direction"] == "LONG":
-                if cp >= tp_val: close_trade(i, tp_val, f"🎯 Chạm {target_tp.upper()}")
-                elif cp <= t["sl"]: close_trade(i, t["sl"], "🛡️ Cắt lỗ SL")
-            else:
-                if cp <= tp_val: close_trade(i, tp_val, f"🎯 Chạm {target_tp.upper()}")
-                elif cp >= t["sl"]: close_trade(i, t["sl"], "🛡️ Cắt lỗ SL")
+        if t["status"] != "OPEN": continue
+        atr_val = t.get("atr_at_entry", None)
+        d = t["direction"]
+        ep = t["entry"]; sl_cur = t["sl"]
+        tp1v = t["tp1"]; tp2v = t["tp2"]; tp3v = t["tp3"]
+        
+        # --- Breakeven Trailing Stop (di dời SL về Entry khi lời >= 1 ATR) ---
+        if atr_val:
+            pnl_pts = (cp - ep) * (1 if d=="LONG" else -1)
+            if pnl_pts >= atr_val and ((d=="LONG" and sl_cur < ep) or (d=="SHORT" and sl_cur > ep)):
+                t["sl"] = ep  # Di chuyển SL về Breakeven
+                t["_be_moved"] = True
+        
+        # --- Kiểm tra TP theo thứ tự từ nhỏ đến lớn ---
+        target_map = {"tp1": tp1v, "tp2": tp2v, "tp3": tp3v}
+        tp_val = target_map.get(target_tp, tp2v)
+        
+        if d == "LONG":
+            if cp >= tp3v: close_trade(i, tp3v, "🎯 Chạm TP3"); continue
+            if cp >= tp_val: close_trade(i, tp_val, f"🎯 Chạm {target_tp.upper()}"); continue
+            if cp <= t["sl"]: close_trade(i, t["sl"], "🛡️ Cắt lỗ SL")
+        else:
+            if cp <= tp3v: close_trade(i, tp3v, "🎯 Chạm TP3"); continue
+            if cp <= tp_val: close_trade(i, tp_val, f"🎯 Chạm {target_tp.upper()}"); continue
+            if cp >= t["sl"]: close_trade(i, t["sl"], "🛡️ Cắt lỗ SL")
 
 # ══════════════════════════════════════════════════════════════
 # ██ SIDEBAR
 # ══════════════════════════════════════════════════════════════
 with st.sidebar:
-    st.markdown('<div style="font-family:JetBrains Mono;font-size:16px;font-weight:700;color:#38bdf8;padding:6px 0 14px">⚡ VN30F TERMINAL v4</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-family:JetBrains Mono;font-size:16px;font-weight:700;color:#38bdf8;padding:6px 0 14px">⚡ VN30F TERMINAL <span style="color:#a78bfa">v5</span></div>', unsafe_allow_html=True)
     symbol = st.selectbox("Hợp đồng", ["VN30F1M","VN30F1Q","VN30F2Q"], index=0)
     auto_refresh = st.toggle("🔄 Tự động cập nhật", value=True)
     refresh_sec  = st.slider("Chu kỳ (giây)", 10, 120, 30) if auto_refresh else 30
@@ -842,7 +871,16 @@ with st.sidebar:
     mute_alerts = st.toggle("🔕 Tắt banner cảnh báo", value=False)
     if st.button("🗑️ Xóa lịch sử cảnh báo", use_container_width=True): st.session_state.alert_history = []; st.session_state.alert_last_score = 0; st.rerun()
     st.markdown("---")
-    if st.button("🗑️ Xóa toàn bộ lịch sử lệnh", use_container_width=True): st.session_state.trade_history = []; st.rerun()
+    if st.button("🗑️ Xóa toàn bộ lịch sử lệnh", use_container_width=True):
+        st.session_state.trade_history = []
+        save_journal()
+        st.rerun()
+    
+    # AI Status Badge
+    open_trades = [t for t in st.session_state.trade_history if t["status"]=="OPEN"]
+    ai_status_clr = "#00e676" if (ai_enabled and is_trading_hours() and not open_trades) else ("#ffd600" if ai_enabled and open_trades else "#475569")
+    ai_status_txt = "🟢 AI Đang Quan Sát" if (ai_enabled and is_trading_hours() and not open_trades) else ("🟡 AI Đang Giữ Lệnh" if (ai_enabled and open_trades) else ("⏸️ AI Đang Tắt" if not ai_enabled else "🔴 Ngoài Giờ GD"))
+    st.markdown(f'<div style="background:#0f1626;border:1px solid {ai_status_clr}44;border-left:3px solid {ai_status_clr};border-radius:6px;padding:7px 10px;font-family:JetBrains Mono;font-size:11px;color:{ai_status_clr};margin-top:8px">{ai_status_txt}</div>', unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════
 # LOAD DATA
@@ -885,6 +923,22 @@ h6.markdown(f'<div class="metric-box"><div class="metric-label">VWAP Dev %</div>
 h7.markdown(f'<div class="metric-box"><div class="metric-label">Dự báo 3-5 phiên</div><div class="metric-value" style="color:{forecast["verdict_color"]};font-size:12px">{forecast["verdict"]}</div></div>', unsafe_allow_html=True)
 
 st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+# --- VN30 Anomaly Banner ---
+_last_body = df1["close"].iloc[-1] - df1["open"].iloc[-1]
+_last_vol_ratio = float(df1["volume"].iloc[-1]) / max(float(df1["vol_ma"].iloc[-1]), 1)
+_vn30_anomaly = abs(_last_body) > 2.5 and _last_vol_ratio > 1.8
+if _vn30_anomaly and not mute_alerts:
+    _bias_str = "🚀 Cân nhắc LONG" if _last_body > 0 else "💥 Cân nhắc SHORT"
+    _clr = "#00e676" if _last_body > 0 else "#ff5252"
+    _css_anom = "alert-long" if _last_body > 0 else "alert-short"
+    st.markdown(f"""
+    <div class="{_css_anom}" style="margin-bottom:8px">
+      <div style="font-size:17px;font-weight:800;color:{_clr}">⚡ BẤT THƯỜNG VN30 — {_bias_str}</div>
+      <div style="font-size:12px;color:#94a3b8;margin-top:4px">Nến vừa có biên độ <b style="color:{_clr}">{_last_body:+.2f}đ</b> với Khối lượng <b style="color:{_clr}">{_last_vol_ratio:.1f}× TB</b>. Có thể có tin tức / giao dịch lớn từ cổ phiếu trụ VN30.</div>
+    </div>
+    """, unsafe_allow_html=True)
+
 render_alert_banner(score, confluence, current_price, mute_alerts)
 
 st.markdown('<div class="sec-hdr">🤖 KHUYẾN NGHỊ HỆ THỐNG</div>', unsafe_allow_html=True)
@@ -1256,51 +1310,66 @@ with trade_col:
     open_exist = any(t["status"] == "OPEN" for t in st.session_state.trade_history)
 
     if ai_enabled and is_trading_hours() and not open_exist:
-        # AI 1.0 (SMC Reversal)
-        ob_bull = float(df1["ob_bull"].iloc[-1]) == 1.0 if "ob_bull" in df1.columns else False
+        # === Các chỉ báo dùng chung ===
+        ob_bull  = float(df1["ob_bull"].iloc[-1])  == 1.0 if "ob_bull"  in df1.columns else False
         fvg_bull = float(df1["fvg_bull"].iloc[-1]) == 1.0 if "fvg_bull" in df1.columns else False
-        ob_bear = float(df1["ob_bear"].iloc[-1]) == 1.0 if "ob_bear" in df1.columns else False
+        ob_bear  = float(df1["ob_bear"].iloc[-1])  == 1.0 if "ob_bear"  in df1.columns else False
         fvg_bear = float(df1["fvg_bear"].iloc[-1]) == 1.0 if "fvg_bear" in df1.columns else False
-        rsi_val = float(df1["rsi"].iloc[-1])
-        vol_spike = float(df1["volume"].iloc[-1]) > float(df1["vol_ma"].iloc[-1]) * 1.5
-        rg = df1["high"].iloc[-1] - df1["low"].iloc[-1] + 1e-9
-        lw_ratio = (min(df1["open"].iloc[-1], df1["close"].iloc[-1]) - df1["low"].iloc[-1]) / rg
-        uw_ratio = (df1["high"].iloc[-1] - max(df1["open"].iloc[-1], df1["close"].iloc[-1])) / rg
-        adx_val = regime5["adx"]
-        
-        # AI 2.0 (Trend & Breakout + VN30 Anomaly Proxy)
-        bb_upper = float(df1["bb_upper"].iloc[-1]) if "bb_upper" in df1.columns else 9999
-        bb_lower = float(df1["bb_lower"].iloc[-1]) if "bb_lower" in df1.columns else 0
+        rsi_val    = float(df1["rsi"].iloc[-1])
+        vol_cur    = float(df1["volume"].iloc[-1])
+        vol_ma_cur = float(df1["vol_ma"].iloc[-1]) or 1
+        vol_spike  = vol_cur > vol_ma_cur * 1.5
+        rg         = df1["high"].iloc[-1] - df1["low"].iloc[-1] + 1e-9
+        lw_ratio   = (min(df1["open"].iloc[-1], df1["close"].iloc[-1]) - df1["low"].iloc[-1]) / rg
+        uw_ratio   = (df1["high"].iloc[-1] - max(df1["open"].iloc[-1], df1["close"].iloc[-1])) / rg
+        adx_val    = float(regime5["adx"])
+        body       = df1["close"].iloc[-1] - df1["open"].iloc[-1]
         macd_slope = float(df1["macd_slope"].iloc[-1]) if "macd_slope" in df1.columns else 0
-        body = df1["close"].iloc[-1] - df1["open"].iloc[-1]
-        
-        vn30_bull_anomaly = body > 3.5 and vol_spike
-        vn30_bear_anomaly = body < -3.5 and vol_spike
-        trend_bull = (current_price > bb_upper or vn30_bull_anomaly) and macd_slope > 0.05 and adx_val > 25
-        trend_bear = (current_price < bb_lower or vn30_bear_anomaly) and macd_slope < -0.05 and adx_val > 25
+        bb_upper   = float(df1["bb_upper"].iloc[-1]) if "bb_upper" in df1.columns else 9999
+        bb_lower   = float(df1["bb_lower"].iloc[-1]) if "bb_lower" in df1.columns else 0
+        ema9_now   = float(df1["ema9"].iloc[-1]);  ema21_now = float(df1["ema21"].iloc[-1])
+        ema9_prev  = float(df1["ema9"].iloc[-2]);  ema21_prev = float(df1["ema21"].iloc[-2])
 
         tp_target = "TP3" if adx_val > 35 else ("TP2" if adx_val > 25 else "TP1")
         actual_tp = calc_tp3 if adx_val > 35 else (calc_tp2 if adx_val > 25 else calc_tp1)
+        atr_now   = float(df1["atr"].iloc[-1]) if "atr" in df1.columns else current_atr
+
+        # === AI 2.0: Breakout Trend-Following ===
+        # Điều kiện: Close vượt BB + MACD dốc + ADX mạnh + EMA alignment
+        bb_breakout_long  = current_price > bb_upper and df1["close"].iloc[-2] <= df1["bb_upper"].iloc[-2]
+        bb_breakout_short = current_price < bb_lower and df1["close"].iloc[-2] >= df1["bb_lower"].iloc[-2]
+        vn30_bull_anomaly = body > 2.5 and vol_cur > vol_ma_cur * 2.0 and ema9_now > ema21_now
+        vn30_bear_anomaly = body < -2.5 and vol_cur > vol_ma_cur * 2.0 and ema9_now < ema21_now
+        
+        trend_bull = (bb_breakout_long or vn30_bull_anomaly) and macd_slope > 0.02 and adx_val > 25 and score >= 30
+        trend_bear = (bb_breakout_short or vn30_bear_anomaly) and macd_slope < -0.02 and adx_val > 25 and score <= -30
 
         if trend_bull:
-            reason = "Breakout dải trên BB hoặc VN30 Anomaly (Vol siêu lớn). Trend dốc. AI 2.0 bắt sóng LONG."
+            cause = "Breakout BB trên xác nhận" if bb_breakout_long else "Bất thường VN30 (Vol > 2×, EMA LONG)"
+            reason = f"[AI 2.0] {cause}. MACD dốc lên, ADX={adx_val:.1f}. Score={score:+d}. Chọn {tp_target}."
             st.session_state.ai_journal.insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "date": datetime.now().strftime("%d/%m/%Y"), "action": "Vào LONG [AI 2.0]", "reason": reason, "price": current_price, "score": score})
-            add_trade("LONG", current_price, current_price+actual_tp, current_price+actual_tp, current_price+actual_tp, current_price-calc_sl, calc_lot_size, score, regime5["regime"], "[AI 2.0]")
+            save_journal()
+            add_trade("LONG", current_price, current_price+calc_tp1, current_price+calc_tp2, current_price+actual_tp, current_price-calc_sl, calc_lot_size, score, regime5["regime"], "[AI 2.0]", atr_now)
             st.rerun()
         elif trend_bear:
-            reason = "Breakout dải dưới BB hoặc VN30 Anomaly (Vol siêu lớn). Trend dốc. AI 2.0 bắt sóng SHORT."
+            cause = "Breakout BB dưới xác nhận" if bb_breakout_short else "Bất thường VN30 (Vol > 2×, EMA SHORT)"
+            reason = f"[AI 2.0] {cause}. MACD dốc xuống, ADX={adx_val:.1f}. Score={score:+d}. Chọn {tp_target}."
             st.session_state.ai_journal.insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "date": datetime.now().strftime("%d/%m/%Y"), "action": "Vào SHORT [AI 2.0]", "reason": reason, "price": current_price, "score": score})
-            add_trade("SHORT", current_price, current_price-actual_tp, current_price-actual_tp, current_price-actual_tp, current_price+calc_sl, calc_lot_size, score, regime5["regime"], "[AI 2.0]")
+            save_journal()
+            add_trade("SHORT", current_price, current_price-calc_tp1, current_price-calc_tp2, current_price-actual_tp, current_price+calc_sl, calc_lot_size, score, regime5["regime"], "[AI 2.0]", atr_now)
             st.rerun()
-        elif score >= 70 and (ob_bull or fvg_bull) and rsi_val < 70 and vol_spike and lw_ratio > 0.4:
-            reason = f"Order Block TĂNG + Vol Lớn + Rút chân. Chốt lời tại {tp_target}."
+        # === AI 1.0: SMC Reversal (chỉ đánh khi score đồng chiều) ===
+        elif score >= 70 and (ob_bull or fvg_bull) and rsi_val < 65 and vol_spike and lw_ratio > 0.4:
+            reason = f"[AI 1.0] {'OB' if ob_bull else 'FVG'} TĂNG + Vol Spike + Rút chân dưới. Score={score:+d}. RSI={rsi_val:.0f}. Chọn {tp_target}."
             st.session_state.ai_journal.insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "date": datetime.now().strftime("%d/%m/%Y"), "action": "Vào LONG [AI 1.0]", "reason": reason, "price": current_price, "score": score})
-            add_trade("LONG", current_price, current_price+actual_tp, current_price+actual_tp, current_price+actual_tp, current_price-calc_sl, calc_lot_size, score, regime5["regime"], "[AI 1.0]")
+            save_journal()
+            add_trade("LONG", current_price, current_price+calc_tp1, current_price+calc_tp2, current_price+actual_tp, current_price-calc_sl, calc_lot_size, score, regime5["regime"], "[AI 1.0]", atr_now)
             st.rerun()
-        elif score <= -70 and (ob_bear or fvg_bear) and rsi_val > 30 and vol_spike and uw_ratio > 0.4:
-            reason = f"Order Block GIẢM + Vol Lớn + Rút chân. Chốt lời tại {tp_target}."
+        elif score <= -70 and (ob_bear or fvg_bear) and rsi_val > 35 and vol_spike and uw_ratio > 0.4:
+            reason = f"[AI 1.0] {'OB' if ob_bear else 'FVG'} GIẢM + Vol Spike + Rút chân trên. Score={score:+d}. RSI={rsi_val:.0f}. Chọn {tp_target}."
             st.session_state.ai_journal.insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "date": datetime.now().strftime("%d/%m/%Y"), "action": "Vào SHORT [AI 1.0]", "reason": reason, "price": current_price, "score": score})
-            add_trade("SHORT", current_price, current_price-actual_tp, current_price-actual_tp, current_price-actual_tp, current_price+calc_sl, calc_lot_size, score, regime5["regime"], "[AI 1.0]")
+            save_journal()
+            add_trade("SHORT", current_price, current_price-calc_tp1, current_price-calc_tp2, current_price-actual_tp, current_price+calc_sl, calc_lot_size, score, regime5["regime"], "[AI 1.0]", atr_now)
             st.rerun()
 
 
