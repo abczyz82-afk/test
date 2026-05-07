@@ -571,6 +571,143 @@ def compute_forecast(df1: pd.DataFrame, df5: pd.DataFrame) -> dict:
 
     return {"factors": factors, "up_score": up_score, "down_score": down_score, "up_prob": up_prob, "down_prob": down_prob, "verdict": verdict, "verdict_color": verdict_color, "verdict_desc": verdict_desc}
 
+def compute_broker_advice(df1, df5, score, confluence, forecast, regime1, regime5, current_price) -> dict:
+    """Phân tích toàn diện theo tư duy của một Broker chuyên nghiệp."""
+    def safe(df, col, d=0):
+        v = df.iloc[-1].get(col, d)
+        return d if (v is None or (isinstance(v, float) and np.isnan(v))) else float(v)
+
+    adx5 = regime5["adx"]; adx1 = regime1["adx"]
+    rsi1 = regime1["rsi"]; rsi5 = safe(df5, "rsi", 50)
+    vwap = safe(df1, "vwap", 0)
+    vwap_u1 = safe(df1, "vwap_u1", 0); vwap_u2 = safe(df1, "vwap_u2", 0)
+    vwap_l1 = safe(df1, "vwap_l1", 0); vwap_l2 = safe(df1, "vwap_l2", 0)
+    bb_upper = safe(df1, "bb_upper", 0); bb_lower = safe(df1, "bb_lower", 0)
+    ema9  = safe(df1, "ema9", 0); ema21 = safe(df1, "ema21", 0); ema50 = safe(df1, "ema50", 0)
+    atr   = safe(df1, "atr", 2); macd_hist = safe(df1, "macd_hist", 0)
+    macd_slope = safe(df1, "macd_slope", 0)
+    ob_bull = safe(df1, "ob_bull", 0) == 1; ob_bear = safe(df1, "ob_bear", 0) == 1
+    fvg_bull = safe(df1, "fvg_bull", 0) == 1; fvg_bear = safe(df1, "fvg_bear", 0) == 1
+    vol_cur = float(df1["volume"].iloc[-1]); vol_ma = safe(df1, "vol_ma", 1)
+    body = df1["close"].iloc[-1] - df1["open"].iloc[-1]
+    stoch_k = safe(df1, "stoch_k", 50)
+    rg = df1["high"].iloc[-1] - df1["low"].iloc[-1] + 1e-9
+    lw_ratio = (min(df1["open"].iloc[-1], df1["close"].iloc[-1]) - df1["low"].iloc[-1]) / rg
+    uw_ratio = (df1["high"].iloc[-1] - max(df1["open"].iloc[-1], df1["close"].iloc[-1])) / rg
+
+    # --- 1. Định pha thị trường ---
+    phase = "SIDEWAY"
+    if adx5 > 30 and regime5["regime"] == "UPTREND": phase = "UPTREND_STRONG"
+    elif adx5 > 22 and regime5["regime"] == "UPTREND": phase = "UPTREND_WEAK"
+    elif adx5 > 30 and regime5["regime"] == "DOWNTREND": phase = "DOWNTREND_STRONG"
+    elif adx5 > 22 and regime5["regime"] == "DOWNTREND": phase = "DOWNTREND_WEAK"
+    elif adx5 < 18: phase = "SIDEWAY_TIGHT"
+
+    phase_desc = {
+        "UPTREND_STRONG":   ("🟢 TĂNG TRƯỬNG MẠNH", "#00e676", "Thị trường đang trong pha tăng mạnh, tư bản lớn đang chủ động. Hướng LONG là ưu tiên số 1."),
+        "UPTREND_WEAK":     ("🟡 TĂNG NHẹ", "#ffd600", "Xu hướng tăng nhưng ADX chưa đủ mạnh. Cần chờ xác nhận thêm trước khi vào LONG."),
+        "DOWNTREND_STRONG": ("🔴 GIẢM TRƯỬNG MẠNH", "#ff5252", "Thị trường đang trong pha giảm mạnh, Market Maker đang bán tống. Hướng SHORT là ưu tiên số 1."),
+        "DOWNTREND_WEAK":   ("🟡 GIẢM NHẹ", "#ffd600", "Xu hướng giảm nhưng ADX chưa đủ mạnh. Cần chờ rõ hướng trước khi vào SHORT."),
+        "SIDEWAY":          ("⏸️ ĐI NGANG", "#ffd600", "Thị trường đang dán đồng giá, tay to đang thiết lập vị thế. Chờ bứt phá hoặc đánh dải."),
+        "SIDEWAY_TIGHT":    ("⏸️ SIDEWAY CHẶT (ÉP LOọNG)", "#a78bfa", "BB Squeeze đang hình thành. Đây là giai đoạn tay to ép vự cá nhỏ cắt SL. Chờ bứt phá bốc tiêu, đừng vào trong dải."),
+    }[phase]
+
+    # --- 2. Tính các mức giá quan trọng ---
+    key_levels = []
+    if vwap > 0:   key_levels.append(("VWAP", vwap, "#f59e0b"))
+    if vwap_u1 > 0: key_levels.append(("VWAP +1σ", vwap_u1, "#f97316"))
+    if vwap_u2 > 0: key_levels.append(("VWAP +2σ", vwap_u2, "#ef4444"))
+    if vwap_l1 > 0: key_levels.append(("VWAP -1σ", vwap_l1, "#38bdf8"))
+    if vwap_l2 > 0: key_levels.append(("VWAP -2σ", vwap_l2, "#6366f1"))
+    if bb_upper > 0: key_levels.append(("BB Trên", bb_upper, "#475569"))
+    if bb_lower > 0: key_levels.append(("BB Dưới", bb_lower, "#475569"))
+    if ema9 > 0:   key_levels.append(("EMA9", ema9, "#f59e0b"))
+    if ema21 > 0:  key_levels.append(("EMA21", ema21, "#38bdf8"))
+    key_levels.sort(key=lambda x: abs(x[1] - current_price))
+
+    # --- 3. Tím các mức tự tính S/R ---
+    recent_highs = df1["high"].iloc[-30:]; recent_lows = df1["low"].iloc[-30:]
+    nearest_res  = recent_highs[recent_highs > current_price].min() if any(recent_highs > current_price) else bb_upper
+    nearest_sup  = recent_lows[recent_lows < current_price].max()   if any(recent_lows < current_price) else bb_lower
+
+    # --- 4. Dấu chân tổ chức ---
+    mm_signals = []
+    if ob_bull:  mm_signals.append(("⬆ Order Block TĂNG", "#00e676", "Vùng sàn nhọn giá của tay to, thường bật mạnh."))
+    if ob_bear:  mm_signals.append(("⬇ Order Block GIẢM", "#ff5252", "Vùng trần của tay to, thường đập mạnh."))
+    if fvg_bull: mm_signals.append(("↑ FVG TĂNG", "#00e676", "Khoảng trống thanh khoản hướng lên, hút giá."))
+    if fvg_bear: mm_signals.append(("↓ FVG GIẢM", "#ff5252", "Khoảng trống thanh khoản hướng xuống, hút giá."))
+    if lw_ratio > 0.45: mm_signals.append(("🐾 Rút chân dưới", "#00e676", f"Đuôi {lw_ratio*100:.0f}% chứng tỏ quét SL và bật lại."))
+    if uw_ratio > 0.45: mm_signals.append(("🐾 Rút chân trên", "#ff5252", f"Đuôi {uw_ratio*100:.0f}% chứng tỏ tay to đẩy giá lên bắn SL rồi kéo xuống."))
+    if vol_cur > vol_ma * 2.0: mm_signals.append(("⚡ Vol Đột Biến", "#a78bfa", f"Khối lượng gấp {vol_cur/max(vol_ma,1):.1f}× trung bình - tổ chức đang đặt lệnh lớn."))
+    if confluence["div1"]["bull"] or confluence["div5"]["bull"]:
+        mm_signals.append(("📊 RSI Phan kỳ TĂNG", "#00e676", "Giá giảm nhưng RSI tăng - lực giảm đang cạn."))
+    if confluence["div1"]["bear"] or confluence["div5"]["bear"]:
+        mm_signals.append(("📊 RSI Phân kỳ GIẢM", "#ff5252", "Giá tăng nhưng RSI giảm - lực tăng đang suy yếu."))
+
+    # --- 5. Tạo Khửửửỳn nghị ---
+    rec_action = "CHờ"; rec_color = "#ffd600"; conviction = 0
+
+    if score >= 70 and (ob_bull or fvg_bull) and rsi1 < 65:
+        rec_action = "VÀO LONG - MẠNH"; rec_color = "#00e676"; conviction = 90
+    elif score >= 40 and regime1["regime"] == "UPTREND" and current_price > ema21:
+        rec_action = "NGHIÊNG LONG - PULLBACK"; rec_color = "#00e676"; conviction = 65
+    elif score <= -70 and (ob_bear or fvg_bear) and rsi1 > 35:
+        rec_action = "VÀO SHORT - MẠNH"; rec_color = "#ff5252"; conviction = 90
+    elif score <= -40 and regime1["regime"] == "DOWNTREND" and current_price < ema21:
+        rec_action = "NGHIÊNG SHORT - HỒI"; rec_color = "#ff5252"; conviction = 65
+    elif phase == "SIDEWAY_TIGHT":
+        rec_action = "CHờ BỤT PHÁ - ĐỮNG VÀO"; rec_color = "#a78bfa"; conviction = 0
+    elif abs(score) >= 50:
+        rec_action = "CANHỜN - SIZE NHỢ"; rec_color = "#ffd600"; conviction = 45
+
+    # --- 6. Tạo lời bình luận của Broker ---
+    notes = []
+    if phase in ["UPTREND_STRONG", "UPTREND_WEAK"]:
+        notes.append(f"Thị trường có xu hướng tăng {adx5:.0f} ADX. Đường hướng LONG là ưu tiên của tôi. Mọi khiến SHORT đều phải có xác nhận 2 khung thời gian.")
+    elif phase in ["DOWNTREND_STRONG", "DOWNTREND_WEAK"]:
+        notes.append(f"Xu hướng giảm ADX={adx5:.0f} — đường kháng cự đang đè nặng. Chỉ đánh SHORT theo trend, tránh bắt đáy khi chưa có dấu hiệu bật rõ.")
+    else:
+        notes.append("Thị trường đang đi ngang, óc tư duy sắp bén lỡi. Tôi sẽ chờ bứt phá có Volume xác nhận. Lưu ý các mức giá lịch sử (VWAP, BB).")
+
+    if rsi1 > 72: notes.append(f"RSI 1P định của phân {rsi1:.0f} — nếu bạn đang nắm LONG, hãy canh chốt. Tay to thường bán táo tợi đây.")
+    elif rsi1 < 28: notes.append(f"RSI 1P quá bán {rsi1:.0f} — cơ hội mua đang xuất hiện. Chờ xác nhận rút chân hướng lên.")
+
+    if stoch_k < 20 and regime1["regime"] == "UPTREND": notes.append("Stoch %K đang quá bán trong uptrend — đây là điểm mua phân phối cơ cấu rất hay.")
+    elif stoch_k > 80 and regime1["regime"] == "DOWNTREND": notes.append("Stoch %K đang quá mua trong downtrend — đây là vị trí bán khống lý tưởng cho cá mập.")
+
+    if vol_cur > vol_ma * 1.8: notes.append(f"Khối lượng {vol_cur/max(vol_ma,1):.1f}× TB — có tiền lớn tham gia. Đi theo hướng nến hiện tại.")
+
+    if current_price > nearest_res * 0.998: notes.append(f"Giá đang đụng vào kháng cự {nearest_res:.1f} — chú ý phản ứng giá, nếu thử kháng cự quá nhiều lần sẽ phá vỡ.")
+    if current_price < nearest_sup * 1.002: notes.append(f"Giá đang tựa vào hỗ trợ {nearest_sup:.1f} — nếu vỡ và đóng cửng thì điểm breakout giảm.")
+
+    # Nhận xét VWAP
+    if vwap > 0:
+        vwap_pct = (current_price - vwap) / vwap * 100
+        if vwap_pct > 1.5:   notes.append(f"Giá đã cách VWAP +{vwap_pct:.1f}% — buy pressure đang thống trị, nhưng không nên duổi mua xa VWAP quá.")
+        elif vwap_pct < -1.5: notes.append(f"Giá đã cách VWAP {vwap_pct:.1f}% — sell pressure đang thống trị, thường sẽ có phúc hồi về VWAP.")
+
+    # SL/TP khuyến nghị
+    r2r = 2.0 if adx5 > 30 else 1.5
+    if "LONG" in rec_action:
+        sugg_sl  = round(nearest_sup - atr * 0.3, 1)
+        sugg_tp  = round(current_price + (current_price - sugg_sl) * r2r, 1)
+    elif "SHORT" in rec_action:
+        sugg_sl  = round(nearest_res + atr * 0.3, 1)
+        sugg_tp  = round(current_price - (sugg_sl - current_price) * r2r, 1)
+    else:
+        sugg_sl = round(current_price - atr * 1.2, 1)
+        sugg_tp = round(current_price + atr * 2.0, 1)
+
+    return {
+        "phase": phase, "phase_desc": phase_desc,
+        "rec_action": rec_action, "rec_color": rec_color, "conviction": conviction,
+        "key_levels": key_levels[:6],
+        "nearest_res": nearest_res, "nearest_sup": nearest_sup,
+        "mm_signals": mm_signals,
+        "notes": notes,
+        "sugg_sl": sugg_sl, "sugg_tp": sugg_tp, "r2r": r2r,
+    }
+
 def backtest_ai(df: pd.DataFrame, atr_sl_mult=1.0) -> tuple:
     trades_ai1 = []
     trades_ai2 = []
@@ -954,7 +1091,10 @@ with score_col:
 chart_col, trade_col = st.columns([3.2, 1.2])
 
 with chart_col:
-    tab1, tab5, tab_pat, tab_sig, tab_wr, tab_alert, tab_ai = st.tabs(["📊 Biểu đồ 1P", "📊 Biểu đồ 5P", "🕯️ Mẫu nến", "🔔 Lịch sử tín hiệu", "📈 Win Rate", "🚨 Cảnh báo", "🧠 Smart Money AI"])
+    tab1, tab5, tab_pat, tab_sig, tab_wr, tab_alert, tab_ai, tab_broker = st.tabs([
+        "📊 Biểu đồ 1P", "📊 Biểu đồ 5P", "🕯️ Mẫu nến", "🔔 Lịch sử tín hiệu",
+        "📈 Win Rate", "🚨 Cảnh báo", "🧠 Smart Money AI", "👨‍💼 Expert Broker"
+    ])
     with tab1: st.plotly_chart(build_chart(df1, f"{symbol}·1P", show_ema, show_bb, show_signals, show_trades, show_vwap, show_vwap_bands, show_patterns, score, pattern_history=pat_hist1), use_container_width=True, config={"displayModeBar": False})
     with tab5: st.plotly_chart(build_chart(df5, f"{symbol}·5P", show_ema, show_bb, show_signals, show_trades, show_vwap, show_vwap_bands, show_patterns, score, pattern_history=pat_hist5), use_container_width=True, config={"displayModeBar": False})
     
@@ -1437,6 +1577,165 @@ with st.expander("📐 BẢNG TIÊU CHÍ XU HƯỚNG & TÍNH TOÁN THỰC TẾ (
           • Volume Bias: <b style='color:{"#00e676" if confluence.get("va",{}).get("bias")=="BULL" else "#ff5252" if confluence.get("va",{}).get("bias")=="BEAR" else "#64748b"}'>{confluence.get("va",{}).get("bias", "NEUTRAL")}</b><br>
           • Score: <b style='color:{"#00e676" if score>0 else "#ff5252"}'>{score:+d}</b> → {confluence.get('rec','')}
         </div>""", unsafe_allow_html=True)
+
+    with tab_broker:
+        broker = compute_broker_advice(df1, df5, score, confluence, forecast, regime1, regime5, current_price)
+        ph_label, ph_color, ph_desc = broker["phase_desc"]
+        rc = broker["rec_color"]; cv = broker["conviction"]
+
+        st.markdown(f"""
+        <div style="background:linear-gradient(135deg,#0a0f1e,#0f1626);border:2px solid {ph_color}33;
+            border-left:4px solid {ph_color};border-radius:12px;padding:16px 20px;margin-bottom:14px">
+          <div style="font-family:'JetBrains Mono',monospace">
+            <div style="font-size:11px;color:#475569;letter-spacing:2px;text-transform:uppercase;margin-bottom:4px">👨‍💼 EXPERT BROKER — PHÂN TÍCH THỊ TRƯỜNG</div>
+            <div style="font-size:22px;font-weight:800;color:{ph_color};margin-bottom:6px">{ph_label}</div>
+            <div style="font-size:12px;color:#94a3b8">{ph_desc}</div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── VN30 Anomaly Monitor ────────────────────────────────
+        st.markdown('<div class="sec-hdr">⚡ RADAR BẤT THƯỜNG VN30 (30 NẾN GẦN NHẤT)</div>', unsafe_allow_html=True)
+        anom_rows = []
+        scan_df = df1.iloc[-30:].copy()
+        vol_ma_scan = scan_df["vol_ma"].fillna(scan_df["volume"].mean())
+        for idx_a, row_a in scan_df.iterrows():
+            body_a = row_a["close"] - row_a["open"]
+            vol_ratio_a = row_a["volume"] / max(float(vol_ma_scan.loc[idx_a]), 1)
+            if abs(body_a) > 2.0 and vol_ratio_a > 1.6:
+                anom_rows.append({
+                    "Thời gian": idx_a.strftime("%d/%m %H:%M"),
+                    "Hướng": "▲ TĂNG" if body_a > 0 else "▼ GIẢM",
+                    "_dir": body_a > 0,
+                    "Biên độ": f"{body_a:+.2f}đ",
+                    "Vol Ratio": f"{vol_ratio_a:.1f}x",
+                    "Close": f"{row_a['close']:.1f}",
+                    "Mức độ": "🔴 Mạnh" if abs(body_a) > 4 or vol_ratio_a > 2.5 else "🟡 Vừa",
+                })
+        if anom_rows:
+            anom_html = """<table style="width:100%;border-collapse:collapse;font-family:'JetBrains Mono',monospace;font-size:11px">
+            <thead><tr style="border-bottom:1px solid #1a2540;color:#475569">
+              <th style="padding:5px 8px;text-align:left">Thời gian</th>
+              <th style="padding:5px 8px;text-align:center">Hướng</th>
+              <th style="padding:5px 8px;text-align:right">Biên độ</th>
+              <th style="padding:5px 8px;text-align:right">Vol</th>
+              <th style="padding:5px 8px;text-align:right">Giá đóng</th>
+              <th style="padding:5px 8px;text-align:center">Mức độ</th>
+            </tr></thead><tbody>"""
+            for r in anom_rows[-10:]:
+                clr = "#00e676" if r["_dir"] else "#ff5252"
+                anom_html += f"""<tr style="border-bottom:1px solid #0f1626">
+                  <td style="padding:5px 8px;color:#64748b">{r['Thời gian']}</td>
+                  <td style="padding:5px 8px;text-align:center;color:{clr};font-weight:700">{r['Hướng']}</td>
+                  <td style="padding:5px 8px;text-align:right;color:{clr}">{r['Biên độ']}</td>
+                  <td style="padding:5px 8px;text-align:right;color:#a78bfa">{r['Vol Ratio']}</td>
+                  <td style="padding:5px 8px;text-align:right;color:#f1f5f9">{r['Close']}</td>
+                  <td style="padding:5px 8px;text-align:center">{r['Mức độ']}</td>
+                </tr>"""
+            anom_html += "</tbody></table>"
+            st.markdown(f'<div style="background:#0f1626;border:1px solid #1a2540;border-radius:8px;padding:10px;margin-bottom:14px">{anom_html}</div>', unsafe_allow_html=True)
+            # Tóm tắt xu hướng anomaly
+            bull_count = sum(1 for r in anom_rows if r["_dir"])
+            bear_count = len(anom_rows) - bull_count
+            anom_bias_clr = "#00e676" if bull_count > bear_count else ("#ff5252" if bear_count > bull_count else "#ffd600")
+            anom_bias_txt = f"▲ Bất thường TĂNG chiếm ưu thế ({bull_count}/{len(anom_rows)})" if bull_count > bear_count else (f"▼ Bất thường GIẢM chiếm ưu thế ({bear_count}/{len(anom_rows)})" if bear_count > bull_count else "Cân bằng")
+            st.markdown(f'<div style="font-family:JetBrains Mono;font-size:11px;color:{anom_bias_clr};padding:4px 0 10px">→ Xu hướng Anomaly: <b>{anom_bias_txt}</b></div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div style="background:#0f1626;border:1px solid #1a2540;border-radius:8px;padding:12px;margin-bottom:14px;font-family:JetBrains Mono;font-size:11px;color:#334155">✅ Không có biến động bất thường trong 30 nến gần nhất. Thị trường đang diễn biến bình thường.</div>', unsafe_allow_html=True)
+
+
+        b_col1, b_col2 = st.columns([1.6, 1.4])
+
+        with b_col1:
+            long_bg = "linear-gradient(135deg,#052212,#072e18)"
+            short_bg = "linear-gradient(135deg,#220505,#2e0707)"
+            neutral_bg = "linear-gradient(135deg,#141205,#1c1a07)"
+            rec_bg = long_bg if "LONG" in broker["rec_action"] else (short_bg if "SHORT" in broker["rec_action"] else neutral_bg)
+            rec_icon = "🟢" if "LONG" in broker["rec_action"] else ("🔴" if "SHORT" in broker["rec_action"] else "⏸️")
+            st.markdown(f"""
+            <div style="background:{rec_bg};border:2px solid {rc};border-radius:12px;padding:18px 20px;margin-bottom:12px;font-family:'JetBrains Mono',monospace">
+              <div style="font-size:11px;color:#475569;letter-spacing:2px;margin-bottom:6px">PHÁN QUYẾT KHUYẾN NGHỊ</div>
+              <div style="font-size:24px;font-weight:800;color:{rc};margin-bottom:10px">{rec_icon} {broker['rec_action']}</div>
+              <div style="display:flex;gap:16px;margin-bottom:12px;font-size:11px">
+                <div><span style="color:#475569">Entry đề xuất</span><br><b style="color:#f1f5f9;font-size:14px">{current_price:.2f}</b></div>
+                <div><span style="color:#475569">SL gợi ý</span><br><b style="color:#ff5252;font-size:14px">{broker['sugg_sl']:.1f}</b></div>
+                <div><span style="color:#475569">TP gợi ý (R{broker['r2r']:.0f}R)</span><br><b style="color:#00e676;font-size:14px">{broker['sugg_tp']:.1f}</b></div>
+              </div>
+              <div style="background:#1a2540;border-radius:6px;height:10px;margin-bottom:4px">
+                <div style="height:10px;border-radius:6px;width:{cv}%;background:{rc}"></div>
+              </div>
+              <div style="font-size:10px;color:#475569">Độ Tin Tưởng: <b style="color:{rc}">{cv}%</b></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown('<div class="sec-hdr">📝 NHẬN XÉT CHUYÊN MÔN</div>', unsafe_allow_html=True)
+            for i, note in enumerate(broker["notes"][:5]):
+                icon = "💡" if i == 0 else "→"
+                border_clr = "#38bdf8" if i == 0 else "#1a2540"
+                txt_clr = "#38bdf8" if i == 0 else "#475569"
+                st.markdown(f"""
+                <div style="background:#0f1626;border-left:3px solid {border_clr};border-radius:0 6px 6px 0;
+                    padding:9px 12px;margin-bottom:6px;font-family:'JetBrains Mono',monospace;font-size:11px;color:#94a3b8">
+                  <span style="color:{txt_clr}">{icon}</span> {note}
+                </div>
+                """, unsafe_allow_html=True)
+            if not broker["notes"]:
+                st.markdown('<div style="color:#334155;font-size:11px;font-family:JetBrains Mono;padding:8px">Thị trường cần thêm dữ liệu để phân tích.</div>', unsafe_allow_html=True)
+
+        with b_col2:
+            st.markdown('<div class="sec-hdr">🏦 DẤU CHÂN TỔ CHỨC (MARKET MAKER)</div>', unsafe_allow_html=True)
+            if broker["mm_signals"]:
+                for sig_name, sig_color, sig_desc in broker["mm_signals"]:
+                    st.markdown(f"""
+                    <div style="background:#0f1626;border:1px solid {sig_color}33;border-left:3px solid {sig_color};
+                        border-radius:0 6px 6px 0;padding:8px 12px;margin-bottom:5px;
+                        font-family:'JetBrains Mono',monospace;font-size:11px">
+                      <div style="color:{sig_color};font-weight:700">{sig_name}</div>
+                      <div style="color:#64748b;margin-top:2px">{sig_desc}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.markdown('<div style="color:#334155;font-size:11px;font-family:JetBrains Mono;padding:8px">Chưa phát hiện dấu hiệu tổ chức đặc biệt.</div>', unsafe_allow_html=True)
+
+            st.markdown('<div class="sec-hdr" style="margin-top:12px">🎯 CÁC MỨC GIÁ QUAN TRỌNG</div>', unsafe_allow_html=True)
+            st.markdown(f"""
+            <div style="background:#0f1626;border:1px solid #ff525244;border-radius:6px;
+                padding:8px 12px;margin-bottom:4px;font-family:'JetBrains Mono',monospace;font-size:11px">
+              <span style="color:#475569">Kháng cự gần nhất:</span> <b style="color:#ff5252">{broker['nearest_res']:.1f}</b>
+              <span style="color:#475569;margin-left:12px">Khoảng: </span><b style="color:#ff5252">+{broker['nearest_res']-current_price:.1f}đ</b>
+            </div>
+            <div style="background:#0f1626;border:1px solid #00e67644;border-radius:6px;
+                padding:8px 12px;margin-bottom:8px;font-family:'JetBrains Mono',monospace;font-size:11px">
+              <span style="color:#475569">Hỗ trợ gần nhất:</span> <b style="color:#00e676">{broker['nearest_sup']:.1f}</b>
+              <span style="color:#475569;margin-left:12px">Khoảng: </span><b style="color:#00e676">{current_price-broker['nearest_sup']:.1f}đ</b>
+            </div>
+            """, unsafe_allow_html=True)
+            for lv_name, lv_val, lv_clr in broker["key_levels"]:
+                dist = lv_val - current_price
+                dist_clr = "#00e676" if dist > 0 else "#ff5252"
+                st.markdown(f"""
+                <div style="display:flex;justify-content:space-between;align-items:center;
+                    padding:5px 8px;border-bottom:1px solid #1a2540;
+                    font-family:'JetBrains Mono',monospace;font-size:10px">
+                  <span style="color:{lv_clr};font-weight:700">{lv_name}</span>
+                  <span style="color:#f1f5f9">{lv_val:.1f}</span>
+                  <span style="color:{dist_clr}">{dist:+.1f}</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+            st.markdown('<div class="sec-hdr" style="margin-top:12px">🔮 DỰ BÁO NGẮN HẠN</div>', unsafe_allow_html=True)
+            fc_c = forecast["verdict_color"]
+            st.markdown(f"""
+            <div style="background:#0f1626;border:1px solid {fc_c}33;border-radius:6px;
+                padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:11px">
+              <div style="color:{fc_c};font-weight:700;font-size:14px">{forecast['verdict']}</div>
+              <div style="color:#64748b;margin-top:4px">{forecast['verdict_desc']}</div>
+              <div style="display:flex;gap:12px;margin-top:8px;font-size:10px;color:#64748b">
+                <span style="color:#00e676">▲ {forecast['up_prob']:.0f}%</span>
+                <span style="color:#ff5252">▼ {forecast['down_prob']:.0f}%</span>
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════
 # FOOTER + AUTO REFRESH
