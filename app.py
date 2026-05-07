@@ -1278,3 +1278,12 @@ if auto_refresh:
     if (datetime.now()-st.session_state.last_refresh).seconds >= refresh_sec:
         st.session_state.last_refresh = datetime.now()
         st.rerun()
+def ema(arr, p):
+    r = np.full(len(arr), np.nan)
+    # Tìm điểm đầu tiên có đủ p nến, nếu không đủ thì bắt đầu từ nến đầu tiên
+    start = min(p - 1, len(arr) - 1)
+    r[start] = arr[:start + 1].mean()
+    k = 2 / (p + 1)
+    for i in range(start + 1, len(arr)):
+        r[i] = arr[i] * k + r[i - 1] * (1 - k)
+    return r
