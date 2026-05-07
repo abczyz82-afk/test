@@ -3,8 +3,14 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dt_time
 import time
+
+def is_trading_hours():
+    now = datetime.now()
+    if now.weekday() >= 5: return False
+    t = now.time()
+    return (dt_time(8, 45) <= t <= dt_time(11, 30)) or (dt_time(13, 0) <= t <= dt_time(14, 45))
 
 # ══════════════════════════════════════════════════════════════
 # PAGE CONFIG
@@ -330,27 +336,42 @@ def detect_candle_patterns(df: pd.DataFrame) -> list:
             "quality": ql, "quality_color": qc,
         })
 
-    if (bd0/rg0 < 0.35) and (lw0/rg0 > 0.55) and (uw0/rg0 < 0.15) and cl1 < o1: add("Hammer","BULL","Nến búa – đảo chiều tăng tại đáy")
-    if (bd0/rg0 < 0.35) and (uw0/rg0 > 0.55) and (lw0/rg0 < 0.15) and cl1 < o1: add("Hammer","BULL","Inverted Hammer – xác nhận tăng")
-    if (bd0/rg0 < 0.35) and (uw0/rg0 > 0.55) and (lw0/rg0 < 0.15) and cl1 > o1: add("Shooting Star","BEAR","Nến sao băng – đảo chiều giảm tại đỉnh")
-    if bd0/rg0 < 0.07: add("Doji","NEUTRAL","Do dự hoàn toàn – sắp đảo chiều")
-    if (bd0/rg0 < 0.25) and (uw0/rg0 > 0.2) and (lw0/rg0 > 0.2): add("Spinning Top","NEUTRAL","Thân nhỏ, râu 2 phía – giằng co")
-    if cl0 > o0 and bd0/rg0 > 0.88: add("Marubozu Bull","BULL","Nến xanh thân đầy – lực mua áp đảo hoàn toàn")
-    if cl0 < o0 and bd0/rg0 > 0.88: add("Marubozu Bear","BEAR","Nến đỏ thân đầy – lực bán áp đảo hoàn toàn")
+    # 1. Nến Đơn (Single Candle)
+    if bd0 <= rg0 * 0.05: add("Doji","NEUTRAL","Do dự hoàn toàn – mở cửa xấp xỉ đóng cửa")
+    elif bd0 <= rg0 * 0.25 and uw0 > rg0 * 0.3 and lw0 > rg0 * 0.3: add("Spinning Top","NEUTRAL","Thân nhỏ, râu 2 phía – giằng co")
+    
+    if cl0 > o0 and bd0 >= rg0 * 0.85: add("Marubozu Bull","BULL","Nến xanh thân đầy – lực mua áp đảo hoàn toàn")
+    if cl0 < o0 and bd0 >= rg0 * 0.85: add("Marubozu Bear","BEAR","Nến đỏ thân đầy – lực bán áp đảo hoàn toàn")
 
-    if cl1 < o1 and cl0 > o0 and cl0 > o1 and o0 < cl1 and bd0 > bd1: add("Bull Engulfing","BULL","Nến xanh nuốt trọn nến đỏ")
-    if cl1 > o1 and cl0 < o0 and cl0 < o1 and o0 > cl1 and bd0 > bd1: add("Bear Engulfing","BEAR","Nến đỏ nuốt trọn nến xanh")
-    if cl1 < o1 and cl0 > o0 and cl0 < o1 and o0 > cl1 and bd0 < bd1 * 0.5: add("Bullish Harami","BULL","Nến xanh nhỏ trong bụng nến đỏ lớn")
-    if cl1 > o1 and cl0 < o0 and cl0 > o1 and o0 < cl1 and bd0 < bd1 * 0.5: add("Bearish Harami","BEAR","Nến đỏ nhỏ trong bụng nến xanh lớn")
-    if (cl1 < o1 and cl0 > o0 and o0 < cl1 and cl0 > (o1 + cl1) / 2 and cl0 < o1): add("Piercing Line","BULL","Nến xanh đóng trên ½ thân nến đỏ")
-    if (cl1 > o1 and cl0 < o0 and o0 > h1 and cl0 < (o1 + cl1) / 2 and cl0 > o1): add("Dark Cloud Cover","BEAR","Nến đỏ đóng dưới ½ thân nến xanh")
-    if abs(lo0 - lo1) / rg0 < 0.03 and cl1 < o1 and cl0 > o0: add("Tweezer Bottom","BULL","Hai nến chạm cùng đáy")
-    if abs(h0 - h1) / rg0 < 0.03 and cl1 > o1 and cl0 < o0: add("Tweezer Top","BEAR","Hai nến chạm cùng đỉnh")
+    if bd0 <= rg0 * 0.3 and lw0 >= rg0 * 0.6 and uw0 <= rg0 * 0.1: 
+        if cl1 < o1: add("Hammer","BULL","Nến búa – đảo chiều tăng tại đáy")
+        elif cl1 > o1: add("Hanging Man","BEAR","Nến người treo cổ – đảo chiều giảm tại đỉnh")
+        
+    if bd0 <= rg0 * 0.3 and uw0 >= rg0 * 0.6 and lw0 <= rg0 * 0.1:
+        if cl1 < o1: add("Inverted Hammer","BULL","Búa ngược – xác nhận đảo chiều tăng")
+        elif cl1 > o1: add("Shooting Star","BEAR","Nến sao băng – đảo chiều giảm tại đỉnh")
 
-    if (cl2 < o2 and bd2/rg2 > 0.5 and bd1/rg1 < 0.3 and cl0 > o0 and cl0 >= (o2 + cl2) / 2): add("Morning Star","BULL","3 nến: đỏ lớn → nhỏ → xanh lớn")
-    if (cl2 > o2 and bd2/rg2 > 0.5 and bd1/rg1 < 0.3 and cl0 < o0 and cl0 <= (o2 + cl2) / 2): add("Evening Star","BEAR","3 nến: xanh lớn → nhỏ → đỏ lớn")
-    if (cl0>o0 and cl1>o1 and cl2>o2 and cl0>cl1>cl2 and o0>o1>o2 and bd0/rg0>0.6 and bd1/rg1>0.6 and bd2/rg2>0.6): add("Three White Soldiers","BULL","3 nến xanh tăng liên tiếp")
-    if (cl0<o0 and cl1<o1 and cl2<o2 and cl0<cl1<cl2 and o0<o1<o2 and bd0/rg0>0.6 and bd1/rg1>0.6 and bd2/rg2>0.6): add("Three Black Crows","BEAR","3 nến đỏ giảm liên tiếp")
+    # 2. Nến Đôi (Double Candles)
+    if cl1 < o1 and cl0 > o0 and cl0 >= o1 and o0 <= cl1 and bd0 > bd1: add("Bull Engulfing","BULL","Nến xanh nuốt trọn thân đỏ trước đó")
+    if cl1 > o1 and cl0 < o0 and cl0 <= o1 and o0 >= cl1 and bd0 > bd1: add("Bear Engulfing","BEAR","Nến đỏ nuốt trọn thân xanh trước đó")
+    
+    if cl1 > o1 and cl0 < o0 and cl0 < o1 and o0 > cl1 and bd0 <= bd1 * 0.5: add("Bearish Harami","BEAR","Nến đỏ nhỏ lọt thỏm trong bụng xanh lớn")
+    if cl1 < o1 and cl0 > o0 and cl0 > o1 and o0 < cl1 and bd0 <= bd1 * 0.5: add("Bullish Harami","BULL","Nến xanh nhỏ lọt thỏm trong bụng đỏ lớn")
+
+    mid1 = (o1 + cl1) / 2
+    if cl1 < o1 and cl0 > o0 and o0 <= cl1 and cl0 > mid1 and cl0 < o1: add("Piercing Line","BULL","Xanh mở dưới đáy đỏ, đóng trên 1/2 thân đỏ")
+    if cl1 > o1 and cl0 < o0 and o0 >= cl1 and cl0 < mid1 and cl0 > o1: add("Dark Cloud Cover","BEAR","Đỏ mở trên đỉnh xanh, đóng dưới 1/2 thân xanh")
+
+    if abs(lo0 - lo1) <= rg0 * 0.05 and cl1 < o1 and cl0 > o0: add("Tweezer Bottom","BULL","Hai nến chạm cùng đáy")
+    if abs(h0 - h1) <= rg0 * 0.05 and cl1 > o1 and cl0 < o0: add("Tweezer Top","BEAR","Hai nến chạm cùng đỉnh")
+
+    # 3. Nến Ba (Triple Candles)
+    mid2 = (o2 + cl2) / 2
+    if cl2 < o2 and bd2 >= rg2 * 0.5 and bd1 <= rg1 * 0.3 and cl0 > o0 and cl0 >= mid2: add("Morning Star","BULL","3 nến: đỏ lớn → nhỏ → xanh lớn")
+    if cl2 > o2 and bd2 >= rg2 * 0.5 and bd1 <= rg1 * 0.3 and cl0 < o0 and cl0 <= mid2: add("Evening Star","BEAR","3 nến: xanh lớn → nhỏ → đỏ lớn")
+
+    if cl2 > o2 and cl1 > o1 and cl0 > o0 and cl1 > cl2 and cl0 > cl1 and bd0>=rg0*0.5 and bd1>=rg1*0.5 and bd2>=rg2*0.5: add("Three White Soldiers","BULL","3 nến xanh tăng liên tiếp thân lớn")
+    if cl2 < o2 and cl1 < o1 and cl0 < o0 and cl1 < cl2 and cl0 < cl1 and bd0>=rg0*0.5 and bd1>=rg1*0.5 and bd2>=rg2*0.5: add("Three Black Crows","BEAR","3 nến đỏ giảm liên tiếp thân lớn")
 
     return patterns
 
