@@ -1905,23 +1905,22 @@ with st.expander("📐 BẢNG TIÊU CHÍ XU HƯỚNG & TÍNH TOÁN THỰC TẾ (
             </div>
             """, unsafe_allow_html=True)
 
-        # ── Lưu khuyến nghị vào lịch sử (nếu chưa có trong phút này) ──
+        # ── Lưu khuyến nghị vào lịch sử (mỗi phút 1 lần) ──
         bh = st.session_state.get("broker_history", [])
         if not bh or bh[0].get("time_str") != broker["time_str"]:
-            if broker["conviction"] > 0:
-                bh.insert(0, {
-                    "time_str": broker["time_str"],
-                    "rec_action": broker["rec_action"],
-                    "conviction": broker["conviction"],
-                    "entry": broker["entry"],
-                    "sl": broker["sugg_sl"],
-                    "tp1": broker["sugg_tp1"],
-                    "tp2": broker["sugg_tp2"],
-                    "tp3": broker["sugg_tp3"],
-                    "phase": broker["phase"],
-                })
-                st.session_state.broker_history = bh[:50]
-                save_journal()
+            bh.insert(0, {
+                "time_str": broker["time_str"],
+                "rec_action": broker["rec_action"],
+                "conviction": broker["conviction"],
+                "entry": broker["entry"],
+                "sl": broker["sugg_sl"],
+                "tp1": broker["sugg_tp1"],
+                "tp2": broker["sugg_tp2"],
+                "tp3": broker["sugg_tp3"],
+                "phase": broker["phase"],
+            })
+            st.session_state.broker_history = bh[:100]
+            save_journal()
 
         # ── Tổng kết phiên ──────────────────────────────────────────
         sess_sums = compute_session_summary(df1)
@@ -1951,10 +1950,10 @@ with st.expander("📐 BẢNG TIÊU CHÍ XU HƯỚNG & TÍNH TOÁN THỰC TẾ (
                     </div>
                     """, unsafe_allow_html=True)
 
-        # ── Lịch sử khuyến nghị của Broker ─────────────────────────
+        # ── Lịch sử khuyến nghị của Broker (LUÔN HIỂN THỊ) ─────────
+        st.markdown('<div class="sec-hdr" style="margin-top:16px">📖 LỊCH SỬ KHUYẾN NGHỊ BROKER (LƯU VĨNH VIỄN)</div>', unsafe_allow_html=True)
         bh_data = st.session_state.get("broker_history", [])
         if bh_data:
-            st.markdown('<div class="sec-hdr" style="margin-top:16px">📖 LỊCH SỬ KHUYẾN NGHỊ BROKER (LƯU VĨNH VIỄN)</div>', unsafe_allow_html=True)
             hist_html = """<table style="width:100%;border-collapse:collapse;font-family:'JetBrains Mono',monospace;font-size:11px">
             <thead><tr style="border-bottom:1px solid #1a2540;color:#475569">
               <th style="padding:5px 8px;text-align:left">Thời gian</th>
@@ -1966,7 +1965,7 @@ with st.expander("📐 BẢNG TIÊU CHÍ XU HƯỚNG & TÍNH TOÁN THỰC TẾ (
               <th style="padding:5px 8px;text-align:right">TP3</th>
               <th style="padding:5px 8px;text-align:center">Tin cậy</th>
             </tr></thead><tbody>"""
-            for h in bh_data[:20]:
+            for h in bh_data[:30]:
                 h_clr = "#00e676" if "LONG" in h.get("rec_action","") else ("#ff5252" if "SHORT" in h.get("rec_action","") else "#ffd600")
                 hist_html += f"""<tr style="border-bottom:1px solid #0f1626">
                   <td style="padding:5px 8px;color:#64748b">{h.get('time_str','-')}</td>
@@ -1984,6 +1983,8 @@ with st.expander("📐 BẢNG TIÊU CHÍ XU HƯỚNG & TÍNH TOÁN THỰC TẾ (
                 st.session_state.broker_history = []
                 save_journal()
                 st.rerun()
+        else:
+            st.markdown('<div style="background:#0f1626;border:1px solid #1a2540;border-radius:8px;padding:12px;font-family:JetBrains Mono;font-size:11px;color:#475569">Chưa có khuyến nghị nào được ghi nhận. Hãy mở tab này trong giờ giao dịch — mỗi phút sẽ tự động lưu 1 khuyến nghị.</div>', unsafe_allow_html=True)
 
         # ── BACKTEST BROKER (Lịch sử quá khứ giống Smart Money AI) ──
         st.markdown('<div class="sec-hdr" style="margin-top:16px">📊 HIỆU SUẤT BROKER (BACKTEST TRÊN DỮ LIỆU QUÁ KHỨ)</div>', unsafe_allow_html=True)
