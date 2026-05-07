@@ -584,11 +584,11 @@ def backtest_ai(df: pd.DataFrame, atr_sl_mult=1.0) -> tuple:
         # ----------------- AI 1.0 (SMC Reversal) -----------------
         if in_trade1:
             if dir1 == "LONG":
-                if row["low"] <= sl1: trades_ai1.append({"entry_time": et1, "exit_time": row.name, "direction": dir1, "entry": ep1, "exit": sl1, "pnl_points": sl1 - ep1, "reason": "Dính SL", "score": "-"}); in_trade1 = False
-                elif row["high"] >= tp1: trades_ai1.append({"entry_time": et1, "exit_time": row.name, "direction": dir1, "entry": ep1, "exit": tp1, "pnl_points": tp1 - ep1, "reason": "Chốt lời (Dynamic TP)", "score": "-"}); in_trade1 = False
+                if row["low"] <= sl1: trades_ai1.append({"entry_time": et1, "exit_time": row.name, "direction": dir1, "entry": ep1, "exit": sl1, "sl": sl1, "tp": tp1, "pnl_points": sl1 - ep1, "reason": "Dính SL", "score": "-"}); in_trade1 = False
+                elif row["high"] >= tp1: trades_ai1.append({"entry_time": et1, "exit_time": row.name, "direction": dir1, "entry": ep1, "exit": tp1, "sl": sl1, "tp": tp1, "pnl_points": tp1 - ep1, "reason": "Chốt lời", "score": "-"}); in_trade1 = False
             else:
-                if row["high"] >= sl1: trades_ai1.append({"entry_time": et1, "exit_time": row.name, "direction": dir1, "entry": ep1, "exit": sl1, "pnl_points": ep1 - sl1, "reason": "Dính SL", "score": "-"}); in_trade1 = False
-                elif row["low"] <= tp1: trades_ai1.append({"entry_time": et1, "exit_time": row.name, "direction": dir1, "entry": ep1, "exit": tp1, "pnl_points": ep1 - tp1, "reason": "Chốt lời (Dynamic TP)", "score": "-"}); in_trade1 = False
+                if row["high"] >= sl1: trades_ai1.append({"entry_time": et1, "exit_time": row.name, "direction": dir1, "entry": ep1, "exit": sl1, "sl": sl1, "tp": tp1, "pnl_points": ep1 - sl1, "reason": "Dính SL", "score": "-"}); in_trade1 = False
+                elif row["low"] <= tp1: trades_ai1.append({"entry_time": et1, "exit_time": row.name, "direction": dir1, "entry": ep1, "exit": tp1, "sl": sl1, "tp": tp1, "pnl_points": ep1 - tp1, "reason": "Chốt lời", "score": "-"}); in_trade1 = False
         else:
             ob_bull = float(row.get("ob_bull", 0)) == 1.0; fvg_bull = float(row.get("fvg_bull", 0)) == 1.0
             ob_bear = float(row.get("ob_bear", 0)) == 1.0; fvg_bear = float(row.get("fvg_bear", 0)) == 1.0
@@ -609,11 +609,11 @@ def backtest_ai(df: pd.DataFrame, atr_sl_mult=1.0) -> tuple:
         # ----------------- AI 2.0 (Trend Following + VN30 Anomaly) -----------------
         if in_trade2:
             if dir2 == "LONG":
-                if row["low"] <= sl2: trades_ai2.append({"entry_time": et2, "exit_time": row.name, "direction": dir2, "entry": ep2, "exit": sl2, "pnl_points": sl2 - ep2, "reason": "Dính SL", "score": "-"}); in_trade2 = False
-                elif row["high"] >= tp2: trades_ai2.append({"entry_time": et2, "exit_time": row.name, "direction": dir2, "entry": ep2, "exit": tp2, "pnl_points": tp2 - ep2, "reason": "Chốt lời (Dynamic TP)", "score": "-"}); in_trade2 = False
+                if row["low"] <= sl2: trades_ai2.append({"entry_time": et2, "exit_time": row.name, "direction": dir2, "entry": ep2, "exit": sl2, "sl": sl2, "tp": tp2, "pnl_points": sl2 - ep2, "reason": "Dính SL", "score": "-"}); in_trade2 = False
+                elif row["high"] >= tp2: trades_ai2.append({"entry_time": et2, "exit_time": row.name, "direction": dir2, "entry": ep2, "exit": tp2, "sl": sl2, "tp": tp2, "pnl_points": tp2 - ep2, "reason": "Chốt lời", "score": "-"}); in_trade2 = False
             else:
-                if row["high"] >= sl2: trades_ai2.append({"entry_time": et2, "exit_time": row.name, "direction": dir2, "entry": ep2, "exit": sl2, "pnl_points": ep2 - sl2, "reason": "Dính SL", "score": "-"}); in_trade2 = False
-                elif row["low"] <= tp2: trades_ai2.append({"entry_time": et2, "exit_time": row.name, "direction": dir2, "entry": ep2, "exit": tp2, "pnl_points": ep2 - tp2, "reason": "Chốt lời (Dynamic TP)", "score": "-"}); in_trade2 = False
+                if row["high"] >= sl2: trades_ai2.append({"entry_time": et2, "exit_time": row.name, "direction": dir2, "entry": ep2, "exit": sl2, "sl": sl2, "tp": tp2, "pnl_points": ep2 - sl2, "reason": "Dính SL", "score": "-"}); in_trade2 = False
+                elif row["low"] <= tp2: trades_ai2.append({"entry_time": et2, "exit_time": row.name, "direction": dir2, "entry": ep2, "exit": tp2, "sl": sl2, "tp": tp2, "pnl_points": ep2 - tp2, "reason": "Chốt lời", "score": "-"}); in_trade2 = False
         else:
             bb_upper = float(row.get("bb_upper", 9999)); bb_lower = float(row.get("bb_lower", 0))
             macd_slope = float(row.get("macd_slope", 0))
@@ -631,8 +631,8 @@ def backtest_ai(df: pd.DataFrame, atr_sl_mult=1.0) -> tuple:
                 in_trade2 = True; dir2 = "SHORT"; ep2 = row["close"]; et2 = row.name
                 sl2 = ep2 + atr * atr_sl_mult; tp2 = ep2 - atr * (3.0 if adx > 35 else (2.0 if adx > 25 else 1.0))
 
-    if in_trade1: trades_ai1.append({"entry_time": et1, "exit_time": df.iloc[-1].name, "direction": dir1, "entry": ep1, "exit": df.iloc[-1]["close"], "pnl_points": (df.iloc[-1]["close"] - ep1) * (1 if dir1=="LONG" else -1), "reason": "Đóng cuối phiên", "score": "-"})
-    if in_trade2: trades_ai2.append({"entry_time": et2, "exit_time": df.iloc[-1].name, "direction": dir2, "entry": ep2, "exit": df.iloc[-1]["close"], "pnl_points": (df.iloc[-1]["close"] - ep2) * (1 if dir2=="LONG" else -1), "reason": "Đóng cuối phiên", "score": "-"})
+    if in_trade1: trades_ai1.append({"entry_time": et1, "exit_time": df.iloc[-1].name, "direction": dir1, "entry": ep1, "exit": df.iloc[-1]["close"], "sl": sl1, "tp": tp1, "pnl_points": (df.iloc[-1]["close"] - ep1) * (1 if dir1=="LONG" else -1), "reason": "Đóng cuối phiên", "score": "-"})
+    if in_trade2: trades_ai2.append({"entry_time": et2, "exit_time": df.iloc[-1].name, "direction": dir2, "entry": ep2, "exit": df.iloc[-1]["close"], "sl": sl2, "tp": tp2, "pnl_points": (df.iloc[-1]["close"] - ep2) * (1 if dir2=="LONG" else -1), "reason": "Đóng cuối phiên", "score": "-"})
         
     return trades_ai1, trades_ai2
 
@@ -771,7 +771,16 @@ def build_chart(df, title, show_ema, show_bb, show_signals, show_trades, show_vw
     for lvl, col_ in [(70,"#ff5252"),(30,"#00e676"),(50,GR)]: fig.add_hline(y=lvl, line_color=col_, line_dash="dot", line_width=0.8, row=4, col=1)
 
     fig.update_layout(template="plotly_dark", paper_bgcolor=BG, plot_bgcolor=BG, margin=dict(l=0,r=0,t=32,b=0), height=600, title=dict(text=f"{title}  |  Score: {score:+d}", font=dict(family="JetBrains Mono",size=12,color="#00e676" if score>0 else "#ff5252"), x=0.01), xaxis_rangeslider_visible=False, hovermode="x unified", legend=dict(orientation="h",yanchor="bottom",y=1.01,font=dict(size=9,color="#64748b"),bgcolor="rgba(0,0,0,0)"))
-    for i in range(1,5): fig.update_xaxes(row=i,col=1,gridcolor=GR,showgrid=True,zeroline=False,tickfont=dict(size=8,color="#334155")); fig.update_yaxes(row=i,col=1,gridcolor=GR,showgrid=True,zeroline=False,tickfont=dict(size=8,color="#475569"))
+    for i in range(1,5):
+        fig.update_xaxes(
+            row=i, col=1, gridcolor=GR, showgrid=True, zeroline=False, tickfont=dict(size=8,color="#334155"),
+            rangebreaks=[
+                dict(bounds=["sat", "mon"]),
+                dict(bounds=[11.5, 13], pattern="hour"),
+                dict(bounds=[14.75, 8.75], pattern="hour")
+            ]
+        )
+        fig.update_yaxes(row=i,col=1,gridcolor=GR,showgrid=True,zeroline=False,tickfont=dict(size=8,color="#475569"))
     fig.update_yaxes(row=4,col=1,range=[0,100])
     return fig
 
@@ -1131,11 +1140,13 @@ with chart_col:
                     "Lệnh":       "🟢 LONG" if t["direction"] == "LONG" else "🔴 SHORT",
                     "Vào":        f"{t['date']} {t['time']}",
                     "Ra":         t.get("exit_time", "-"),
-                    "Entry":      f"{t['entry']:.2f}",
-                    "Exit":       f"{t.get('exit_price', 0):.2f}",
+                    "Entry":      f"{t['entry']:.1f}",
+                    "SL":         f"{t.get('sl', 0):.1f}",
+                    "TP1":        f"{t.get('tp1', 0):.1f}",
+                    "Exit":       f"{t.get('exit_price', 0):.1f}",
                     "P&L":        f"{t.get('pnl_points', 0):+.1f}đ",
                     "Score":      f"{t.get('score', 0):+d}",
-                    "Regime":     t.get("regime", "-"),
+                    "Tag":        t.get("signal_tag", "-"),
                     "Kết quả":    t.get("reason", "-"),
                 } for t in closed_trades]
                 df_closed = pd.DataFrame(rows)
@@ -1189,12 +1200,14 @@ with chart_col:
                 st.markdown('<b style="font-size:11px;color:#00e676">Lệnh Đã Đóng (Real)</b>', unsafe_allow_html=True)
                 wr1 = len([t for t in ai1_live if t.get("pnl_points",0)>0]) / len(ai1_live) * 100
                 st.markdown(f"<div style='font-size:11px;margin-bottom:8px'>Win Rate: <b>{wr1:.1f}%</b> | P&L: <b>{sum(t.get('pnl_points',0) for t in ai1_live):+.1f}đ</b></div>", unsafe_allow_html=True)
+                rows1_live = [{"Vào": f"{t['date']} {t['time']}", "Đóng": t['exit_time'], "Lệnh": t["direction"], "Entry": t["entry"], "SL": t["sl"], "TP": t["tp1"], "Exit": t["exit_price"], "P&L": f"{t['pnl_points']:+.1f}"} for t in ai1_live]
+                st.dataframe(pd.DataFrame(rows1_live), use_container_width=True, hide_index=True)
             
             if sim_ai1:
                 st.markdown('<div style="margin-top:10px;font-size:11px;color:#38bdf8"><b>Mô Phỏng Lịch Sử (Backtest)</b></div>', unsafe_allow_html=True)
                 swr1 = len([t for t in sim_ai1 if t.get("pnl_points",0)>0]) / len(sim_ai1) * 100
                 st.markdown(f"<div style='font-size:11px;margin-bottom:8px'>Win Rate: <b>{swr1:.1f}%</b> | Lệnh: <b>{len(sim_ai1)}</b> | P&L: <b>{sum(t.get('pnl_points',0) for t in sim_ai1):+.1f}đ</b></div>", unsafe_allow_html=True)
-                rows1 = [{"Time": t['entry_time'].strftime("%d/%m %H:%M") if pd.notnull(t['entry_time']) else "-", "Dir": t["direction"], "P&L": f"{t['pnl_points']:+.1f}"} for t in sim_ai1]
+                rows1 = [{"Vào": t['entry_time'].strftime("%d/%m %H:%M") if pd.notnull(t['entry_time']) else "-", "Đóng": t['exit_time'].strftime("%d/%m %H:%M") if pd.notnull(t['exit_time']) else "-", "Lệnh": t["direction"], "Entry": f"{t['entry']:.1f}", "SL": f"{t.get('sl',0):.1f}", "TP": f"{t.get('tp',0):.1f}", "Exit": f"{t['exit']:.1f}", "P&L": f"{t['pnl_points']:+.1f}"} for t in sim_ai1]
                 st.dataframe(pd.DataFrame(rows1), use_container_width=True, hide_index=True)
 
         with c_ai2:
@@ -1204,12 +1217,14 @@ with chart_col:
                 st.markdown('<b style="font-size:11px;color:#00e676">Lệnh Đã Đóng (Real)</b>', unsafe_allow_html=True)
                 wr2 = len([t for t in ai2_live if t.get("pnl_points",0)>0]) / len(ai2_live) * 100
                 st.markdown(f"<div style='font-size:11px;margin-bottom:8px'>Win Rate: <b>{wr2:.1f}%</b> | P&L: <b>{sum(t.get('pnl_points',0) for t in ai2_live):+.1f}đ</b></div>", unsafe_allow_html=True)
+                rows2_live = [{"Vào": f"{t['date']} {t['time']}", "Đóng": t['exit_time'], "Lệnh": t["direction"], "Entry": t["entry"], "SL": t["sl"], "TP": t["tp1"], "Exit": t["exit_price"], "P&L": f"{t['pnl_points']:+.1f}"} for t in ai2_live]
+                st.dataframe(pd.DataFrame(rows2_live), use_container_width=True, hide_index=True)
             
             if sim_ai2:
                 st.markdown('<div style="margin-top:10px;font-size:11px;color:#38bdf8"><b>Mô Phỏng Lịch Sử (Backtest)</b></div>', unsafe_allow_html=True)
                 swr2 = len([t for t in sim_ai2 if t.get("pnl_points",0)>0]) / len(sim_ai2) * 100
                 st.markdown(f"<div style='font-size:11px;margin-bottom:8px'>Win Rate: <b>{swr2:.1f}%</b> | Lệnh: <b>{len(sim_ai2)}</b> | P&L: <b>{sum(t.get('pnl_points',0) for t in sim_ai2):+.1f}đ</b></div>", unsafe_allow_html=True)
-                rows2 = [{"Time": t['entry_time'].strftime("%d/%m %H:%M") if pd.notnull(t['entry_time']) else "-", "Dir": t["direction"], "P&L": f"{t['pnl_points']:+.1f}"} for t in sim_ai2]
+                rows2 = [{"Vào": t['entry_time'].strftime("%d/%m %H:%M") if pd.notnull(t['entry_time']) else "-", "Đóng": t['exit_time'].strftime("%d/%m %H:%M") if pd.notnull(t['exit_time']) else "-", "Lệnh": t["direction"], "Entry": f"{t['entry']:.1f}", "SL": f"{t.get('sl',0):.1f}", "TP": f"{t.get('tp',0):.1f}", "Exit": f"{t['exit']:.1f}", "P&L": f"{t['pnl_points']:+.1f}"} for t in sim_ai2]
                 st.dataframe(pd.DataFrame(rows2), use_container_width=True, hide_index=True)
                 
         st.markdown('<div class="sec-hdr" style="margin-top:20px">📜 NHẬT KÝ RA QUYẾT ĐỊNH</div>', unsafe_allow_html=True)
