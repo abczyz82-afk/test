@@ -140,28 +140,15 @@ def _simulate(tf_minutes: int, n: int = 350, seed: int = 42) -> pd.DataFrame:
     return df.set_index("time")
 
 # ══════════════════════════════════════════════════════════════
-# CHỈ BÁO KỸ THUẬT (Đã tích hợp hàm EMA có Fallback thông minh)
+# CHỈ BÁO KỸ THUẬT
 # ══════════════════════════════════════════════════════════════
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     c, h, l, n = df["close"].values, df["high"].values, df["low"].values, len(df)
 
     def ema(arr, p):
-        n_arr = len(arr)
-        r = np.full(n_arr, np.nan)
-        if n_arr == 0:
-            return r
-        k = 2 / (p + 1)
-        if n_arr < p:
-            # Fallback: Không đủ nến, mượn giá trị nến đầu tiên làm điểm bắt đầu
-            r[0] = arr[0]
-            start_idx = 1
-        else:
-            # Chuẩn xác: Lấy giá trị trung bình của p nến đầu tiên làm điểm bắt đầu
-            r[p-1] = arr[:p].mean()
-            start_idx = p
-        # Tính EMA cho các nến tiếp theo
-        for i in range(start_idx, n_arr): 
-            r[i] = arr[i] * k + r[i-1] * (1 - k)
+        r = np.full(len(arr), np.nan); k = 2/(p+1)
+        r[p-1] = arr[:p].mean()
+        for i in range(p, len(arr)): r[i] = arr[i]*k + r[i-1]*(1-k)
         return r
 
     df["ema9"]  = ema(c, 9)
@@ -176,36 +163,26 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["bb_lower"] = rm - 2*rs
     df["bb_width"] = (df["bb_upper"] - df["bb_lower"]) / pd.Series(rm).replace(0, np.nan).values
 
-    # Tính RSI chuẩn Wilder
-    delta = df["close"].diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(alpha=1/14, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1/14, adjust=False).mean()
-    rs_val = avg_gain / avg_loss.replace(0, np.nan)
-    rsi_calc = 100 - (100 / (1 + rs_val))
-    rsi_calc.loc[(avg_loss == 0) & (avg_gain > 0)] = 100
-    df["rsi"] = rsi_calc.ffill().fillna(50)
+    d = pd.Series(c).diff()
+    g_ = d.clip(lower=0).rolling(14).mean()
+    l_ = (-d.clip(upper=0)).rolling(14).mean().replace(0, np.nan)
+    df["rsi"] = (100 - 100/(1 + g_/l_)).fillna(50)
 
     e12, e26   = ema(c,12), ema(c,26)
     ml         = e12 - e26
     df["macd"]        = ml
     df["macd_signal"] = ema(np.nan_to_num(ml), 9)
     df["macd_hist"]   = ml - df["macd_signal"].values
-    df["macd_slope"]  = pd.Series(df["macd_hist"].values).diff(3)   
+    df["macd_slope"]  = pd.Series(df["macd_hist"].values).diff(3)
 
     df["prev_close"] = df["close"].shift(1)
-    df['tr1'] = df['high'] - df['low']
-    df['tr2'] = (df['high'] - df['prev_close']).abs()
-    df['tr3'] = (df['low'] - df['prev_close']).abs()
-    df['tr'] = df[['tr1', 'tr2', 'tr3']].max(axis=1)
-    
+    df["tr"] = df[["high","low","prev_close"]].apply(
+        lambda r: max(r["high"]-r["low"], abs(r["high"]-r["prev_close"]), abs(r["low"]-r["prev_close"])), axis=1)
     df["up_move"]   = df["high"] - df["high"].shift(1)
     df["down_move"] = df["low"].shift(1) - df["low"]
     df["+dm"] = np.where((df["up_move"]>df["down_move"]) & (df["up_move"]>0), df["up_move"], 0)
     df["-dm"] = np.where((df["down_move"]>df["up_move"]) & (df["down_move"]>0), df["down_move"], 0)
     rma = lambda s, p: s.ewm(alpha=1/p, min_periods=p, adjust=False).mean()
-    
     df["atr"]    = rma(df["tr"], 14)
     dmp14 = rma(df["+dm"], 14); dmm14 = rma(df["-dm"], 14)
     safe = lambda x: x.replace(0, np.nan)
@@ -227,18 +204,19 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["_tp_vwap_sq"] = df["volume"] * (df["tp_"] - df["vwap"]) ** 2
     df["_cum_var"]    = df["_tp_vwap_sq"].groupby(df["date_"]).cumsum()
     df["vwap_sd"]     = np.sqrt(df["_cum_var"] / df["cum_v"].replace(0, np.nan))
-    df["vwap_u1"]     = df["vwap"] + 1 * df["vwap_sd"]   
-    df["vwap_u2"]     = df["vwap"] + 2 * df["vwap_sd"]   
-    df["vwap_l1"]     = df["vwap"] - 1 * df["vwap_sd"]   
-    df["vwap_l2"]     = df["vwap"] - 2 * df["vwap_sd"]   
+    df["vwap_u1"]     = df["vwap"] + 1 * df["vwap_sd"]
+    df["vwap_u2"]     = df["vwap"] + 2 * df["vwap_sd"]
+    df["vwap_l1"]     = df["vwap"] - 1 * df["vwap_sd"]
+    df["vwap_l2"]     = df["vwap"] - 2 * df["vwap_sd"]
 
     df["vwap_dev_pct"] = (df["close"] - df["vwap"]) / df["vwap"].replace(0, np.nan) * 100
+
     df["vwap_buy"]  = (df["close"] > df["vwap"]) & (df["close"].shift(1) <= df["vwap"].shift(1))
     df["vwap_sell"] = (df["close"] < df["vwap"]) & (df["close"].shift(1) >= df["vwap"].shift(1))
     df["vwap_bounce_up"]  = (df["low"].shift(1) <= df["vwap_l2"].shift(1)) & (df["close"] > df["vwap_l2"])
     df["vwap_bounce_dn"]  = (df["high"].shift(1) >= df["vwap_u2"].shift(1)) & (df["close"] < df["vwap_u2"])
 
-    df.drop(["prev_close","up_move","down_move","+dm","-dm","dx", "tr1", "tr2", "tr3", "tr",
+    df.drop(["prev_close","up_move","down_move","+dm","-dm","dx",
              "date_","tp_","cum_tv","cum_v","_tp_vwap_sq","_cum_var"], axis=1, inplace=True, errors="ignore")
 
     df["vol_ma"] = pd.Series(df["volume"].values).rolling(20).mean().values
@@ -252,9 +230,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-# ══════════════════════════════════════════════════════════════
-# CÁC HÀM XỬ LÝ (MẪU NẾN & NHẬT KÝ)
-# ══════════════════════════════════════════════════════════════
+
 PATTERN_BASE_RELIABILITY = {
     "Morning Star":        82, "Evening Star":       80,
     "Three White Soldiers":78, "Three Black Crows":  77,
@@ -270,12 +246,15 @@ PATTERN_BASE_RELIABILITY = {
 def detect_candle_patterns(df: pd.DataFrame) -> list:
     patterns = []
     if len(df) < 5: return patterns
+
     c0,c1,c2,c3,c4 = [df.iloc[-(i+1)] for i in range(5)]
+
     def vals(c):
         o,h,lo,cl = c["open"],c["high"],c["low"],c["close"]
         body = abs(cl-o); rng  = h-lo+1e-9
-        uw = h - max(cl,o); lw = min(cl,o) - lo
-        return o,h,lo,cl,body,rng,uw,lw
+        upper_wick = h - max(cl,o)
+        lower_wick = min(cl,o) - lo
+        return o,h,lo,cl,body,rng,upper_wick,lower_wick
 
     o0,h0,lo0,cl0,bd0,rg0,uw0,lw0 = vals(c0)
     o1,h1,lo1,cl1,bd1,rg1,uw1,lw1 = vals(c1)
@@ -283,13 +262,16 @@ def detect_candle_patterns(df: pd.DataFrame) -> list:
     o3,h3,lo3,cl3,bd3,rg3,_,_      = vals(c3)
     o4,h4,lo4,cl4,bd4,rg4,_,_      = vals(c4)
 
+    vwap       = float(c0.get("vwap", 0)   or 0)
+    bb_lo_val  = float(c0.get("bb_lower",0) or 0)
+    bb_up_val  = float(c0.get("bb_upper",9999) or 9999)
     vwap_l2    = float(c0.get("vwap_l2",0)  or 0)
     vwap_u2    = float(c0.get("vwap_u2",9999) or 9999)
     bb_w       = float(c0.get("bb_width",0.03) or 0.03)
     hist_bbw   = df["bb_width"].dropna().tail(50)
     is_squeeze = len(hist_bbw)>10 and bb_w < hist_bbw.quantile(0.20)
-    at_bb_low  = cl0 <= float(c0.get("bb_lower",0) or 0) * 1.002
-    at_bb_high = cl0 >= float(c0.get("bb_upper",9999) or 9999) * 0.998
+    at_bb_low  = cl0 <= bb_lo_val * 1.002
+    at_bb_high = cl0 >= bb_up_val * 0.998
     at_vwap_l2 = cl0 <= vwap_l2 * 1.003 if vwap_l2 > 0 else False
     at_vwap_u2 = cl0 >= vwap_u2 * 0.997 if vwap_u2 < 9998 else False
     vol_spike  = float(c0.get("volume",0)) > float(c0.get("vol_ma",1) or 1) * 1.5
@@ -322,40 +304,62 @@ def detect_candle_patterns(df: pd.DataFrame) -> list:
             "quality": ql, "quality_color": qc,
         })
 
-    if (bd0/rg0 < 0.35) and (lw0/rg0 > 0.55) and (uw0/rg0 < 0.15) and cl1 < o1: add("Hammer","BULL","Nến búa – đảo chiều tăng tại đáy")
-    if (bd0/rg0 < 0.35) and (uw0/rg0 > 0.55) and (lw0/rg0 < 0.15) and cl1 < o1: add("Hammer","BULL","Inverted Hammer – xác nhận tăng")
-    if (bd0/rg0 < 0.35) and (uw0/rg0 > 0.55) and (lw0/rg0 < 0.15) and cl1 > o1: add("Shooting Star","BEAR","Nến sao băng – đảo chiều giảm tại đỉnh")
-    if bd0/rg0 < 0.07: add("Doji","NEUTRAL","Do dự hoàn toàn – sắp đảo chiều")
-    if (bd0/rg0 < 0.25) and (uw0/rg0 > 0.2) and (lw0/rg0 > 0.2): add("Spinning Top","NEUTRAL","Thân nhỏ, râu 2 phía – giằng co")
-    if cl0 > o0 and bd0/rg0 > 0.88: add("Marubozu Bull","BULL","Nến xanh thân đầy – lực mua áp đảo hoàn toàn")
-    if cl0 < o0 and bd0/rg0 > 0.88: add("Marubozu Bear","BEAR","Nến đỏ thân đầy – lực bán áp đảo hoàn toàn")
+    if (bd0/rg0 < 0.35) and (lw0/rg0 > 0.55) and (uw0/rg0 < 0.15) and cl1 < o1:
+        add("Hammer","BULL","Nến búa – đảo chiều tăng tại đáy. Râu dưới dài ≥ 2× thân")
+    if (bd0/rg0 < 0.35) and (uw0/rg0 > 0.55) and (lw0/rg0 < 0.15) and cl1 < o1:
+        add("Hammer","BULL","Inverted Hammer – xác nhận tăng nếu nến sau đóng cao hơn")
+    if (bd0/rg0 < 0.35) and (uw0/rg0 > 0.55) and (lw0/rg0 < 0.15) and cl1 > o1:
+        add("Shooting Star","BEAR","Nến sao băng – đảo chiều giảm tại đỉnh. Râu trên dài ≥ 2× thân")
+    if bd0/rg0 < 0.07:
+        add("Doji","NEUTRAL","Do dự hoàn toàn – sắp đảo chiều. Mở=Đóng")
+    if (bd0/rg0 < 0.25) and (uw0/rg0 > 0.2) and (lw0/rg0 > 0.2):
+        add("Spinning Top","NEUTRAL","Thân nhỏ, râu 2 phía – bull/bear đang giằng co")
+    if cl0 > o0 and bd0/rg0 > 0.88:
+        add("Marubozu Bull","BULL","Nến xanh thân đầy – lực mua áp đảo hoàn toàn")
+    if cl0 < o0 and bd0/rg0 > 0.88:
+        add("Marubozu Bear","BEAR","Nến đỏ thân đầy – lực bán áp đảo hoàn toàn")
 
-    if cl1 < o1 and cl0 > o0 and cl0 > o1 and o0 < cl1 and bd0 > bd1: add("Bull Engulfing","BULL","Nến xanh nuốt trọn nến đỏ")
-    if cl1 > o1 and cl0 < o0 and cl0 < o1 and o0 > cl1 and bd0 > bd1: add("Bear Engulfing","BEAR","Nến đỏ nuốt trọn nến xanh")
-    if cl1 < o1 and cl0 > o0 and cl0 < o1 and o0 > cl1 and bd0 < bd1 * 0.5: add("Bullish Harami","BULL","Nến xanh nhỏ trong bụng nến đỏ lớn")
-    if cl1 > o1 and cl0 < o0 and cl0 > o1 and o0 < cl1 and bd0 < bd1 * 0.5: add("Bearish Harami","BEAR","Nến đỏ nhỏ trong bụng nến xanh lớn")
-    if (cl1 < o1 and cl0 > o0 and o0 < cl1 and cl0 > (o1 + cl1) / 2 and cl0 < o1): add("Piercing Line","BULL","Nến xanh đóng trên ½ thân nến đỏ")
-    if (cl1 > o1 and cl0 < o0 and o0 > h1 and cl0 < (o1 + cl1) / 2 and cl0 > o1): add("Dark Cloud Cover","BEAR","Nến đỏ đóng dưới ½ thân nến xanh")
-    if abs(lo0 - lo1) / rg0 < 0.03 and cl1 < o1 and cl0 > o0: add("Tweezer Bottom","BULL","Hai nến chạm cùng đáy")
-    if abs(h0 - h1) / rg0 < 0.03 and cl1 > o1 and cl0 < o0: add("Tweezer Top","BEAR","Hai nến chạm cùng đỉnh")
+    if cl1 < o1 and cl0 > o0 and cl0 > o1 and o0 < cl1 and bd0 > bd1:
+        add("Bull Engulfing","BULL","Nến xanh nuốt trọn nến đỏ – đảo chiều tăng mạnh")
+    if cl1 > o1 and cl0 < o0 and cl0 < o1 and o0 > cl1 and bd0 > bd1:
+        add("Bear Engulfing","BEAR","Nến đỏ nuốt trọn nến xanh – đảo chiều giảm mạnh")
+    if cl1 < o1 and cl0 > o0 and cl0 < o1 and o0 > cl1 and bd0 < bd1 * 0.5:
+        add("Bullish Harami","BULL","Nến xanh nhỏ trong bụng nến đỏ lớn – mẫu đảo chiều yếu hơn")
+    if cl1 > o1 and cl0 < o0 and cl0 > o1 and o0 < cl1 and bd0 < bd1 * 0.5:
+        add("Bearish Harami","BEAR","Nến đỏ nhỏ trong bụng nến xanh lớn – nguy cơ đảo chiều")
+    if (cl1 < o1 and cl0 > o0 and o0 < cl1 and cl0 > (o1 + cl1) / 2 and cl0 < o1):
+        add("Piercing Line","BULL","Nến xanh mở dưới đáy nến đỏ, đóng trên ½ thân nến đỏ")
+    if (cl1 > o1 and cl0 < o0 and o0 > h1 and cl0 < (o1 + cl1) / 2 and cl0 > o1):
+        add("Dark Cloud Cover","BEAR","Nến đỏ mở trên đỉnh nến xanh, đóng dưới ½ thân nến xanh")
+    if abs(lo0 - lo1) / rg0 < 0.03 and cl1 < o1 and cl0 > o0:
+        add("Tweezer Bottom","BULL","Hai nến chạm cùng đáy – vùng hỗ trợ rất mạnh")
+    if abs(h0 - h1) / rg0 < 0.03 and cl1 > o1 and cl0 < o0:
+        add("Tweezer Top","BEAR","Hai nến chạm cùng đỉnh – vùng kháng cự rất mạnh")
 
-    if (cl2 < o2 and bd2/rg2 > 0.5 and bd1/rg1 < 0.3 and cl0 > o0 and cl0 >= (o2 + cl2) / 2): add("Morning Star","BULL","3 nến: đỏ lớn → nhỏ → xanh lớn")
-    if (cl2 > o2 and bd2/rg2 > 0.5 and bd1/rg1 < 0.3 and cl0 < o0 and cl0 <= (o2 + cl2) / 2): add("Evening Star","BEAR","3 nến: xanh lớn → nhỏ → đỏ lớn")
-    if (cl0>o0 and cl1>o1 and cl2>o2 and cl0>cl1>cl2 and o0>o1>o2 and bd0/rg0>0.6 and bd1/rg1>0.6 and bd2/rg2>0.6): add("Three White Soldiers","BULL","3 nến xanh tăng liên tiếp")
-    if (cl0<o0 and cl1<o1 and cl2<o2 and cl0<cl1<cl2 and o0<o1<o2 and bd0/rg0>0.6 and bd1/rg1>0.6 and bd2/rg2>0.6): add("Three Black Crows","BEAR","3 nến đỏ giảm liên tiếp")
+    if (cl2 < o2 and bd2/rg2 > 0.5 and bd1/rg1 < 0.3 and cl0 > o0 and cl0 >= (o2 + cl2) / 2):
+        add("Morning Star","BULL","3 nến: đỏ lớn → nhỏ (do dự) → xanh lớn. Đảo chiều tăng mạnh")
+    if (cl2 > o2 and bd2/rg2 > 0.5 and bd1/rg1 < 0.3 and cl0 < o0 and cl0 <= (o2 + cl2) / 2):
+        add("Evening Star","BEAR","3 nến: xanh lớn → nhỏ (do dự) → đỏ lớn. Đảo chiều giảm mạnh")
+    if (cl0>o0 and cl1>o1 and cl2>o2 and cl0>cl1>cl2 and o0>o1>o2 and bd0/rg0>0.6 and bd1/rg1>0.6 and bd2/rg2>0.6):
+        add("Three White Soldiers","BULL","3 nến xanh tăng liên tiếp – xu hướng tăng rất mạnh")
+    if (cl0<o0 and cl1<o1 and cl2<o2 and cl0<cl1<cl2 and o0<o1<o2 and bd0/rg0>0.6 and bd1/rg1>0.6 and bd2/rg2>0.6):
+        add("Three Black Crows","BEAR","3 nến đỏ giảm liên tiếp – xu hướng giảm rất mạnh")
 
     return patterns
+
 
 def scan_pattern_history(df: pd.DataFrame, lookback: int = 150) -> list:
     results = []
     df_s = df.tail(lookback + 5).copy()
     seen_times = set()
+
     for i in range(5, len(df_s)):
         sub   = df_s.iloc[:i+1]
         pats  = detect_candle_patterns(sub)
         t     = sub.index[-1]
         price = float(sub["close"].iloc[-1])
         atr   = float(sub["atr"].iloc[-1]) if not np.isnan(sub["atr"].iloc[-1]) else 1.0
+
         for p in pats:
             key = f"{t}_{p['name']}"
             if key in seen_times: continue
@@ -363,8 +367,460 @@ def scan_pattern_history(df: pd.DataFrame, lookback: int = 150) -> list:
             offset = atr * 0.8
             chart_y = (price - offset) if p["bias"] == "BULL" else (price + offset)
             results.append({**p, "time": t, "price": price, "chart_y": chart_y})
+
     return results
 
+def detect_rsi_divergence(df: pd.DataFrame, lookback: int = 30) -> dict:
+    sub = df.dropna(subset=["rsi"]).tail(lookback)
+    if len(sub) < 10:
+        return {"bull": False, "bear": False, "desc": ""}
+
+    prices = sub["close"].values
+    rsis   = sub["rsi"].values
+
+    price_lows = [(i, prices[i]) for i in range(1, len(prices)-1)
+                  if prices[i] < prices[i-1] and prices[i] < prices[i+1]]
+    bull_div = False
+    if len(price_lows) >= 2:
+        i1, p1 = price_lows[-2]; i2, p2 = price_lows[-1]
+        if p2 < p1 and rsis[i2] > rsis[i1] + 2:
+            bull_div = True
+
+    price_highs = [(i, prices[i]) for i in range(1, len(prices)-1)
+                   if prices[i] > prices[i-1] and prices[i] > prices[i+1]]
+    bear_div = False
+    if len(price_highs) >= 2:
+        i1, p1 = price_highs[-2]; i2, p2 = price_highs[-1]
+        if p2 > p1 and rsis[i2] < rsis[i1] - 2:
+            bear_div = True
+
+    desc = ""
+    if bull_div: desc = "Giá tạo đáy thấp hơn nhưng RSI tạo đáy cao hơn → lực giảm cạn dần"
+    if bear_div: desc = "Giá tạo đỉnh cao hơn nhưng RSI tạo đỉnh thấp hơn → lực tăng suy yếu"
+
+    return {"bull": bull_div, "bear": bear_div, "desc": desc}
+
+def analyze_volume_accumulation(df: pd.DataFrame, window: int = 10) -> dict:
+    sub = df.tail(window)
+    bull_vol = sub.loc[sub["close"] >= sub["open"], "volume"].sum()
+    bear_vol = sub.loc[sub["close"] <  sub["open"], "volume"].sum()
+    total    = bull_vol + bear_vol + 1e-9
+    ratio    = bull_vol / total
+
+    if ratio > 0.65:   bias, desc = "BULL", f"Mua ({ratio*100:.0f}%) áp đảo Bán ({(1-ratio)*100:.0f}%)"
+    elif ratio < 0.35: bias, desc = "BEAR", f"Bán ({(1-ratio)*100:.0f}%) áp đảo Mua ({ratio*100:.0f}%)"
+    else:              bias, desc = "NEUTRAL", f"Cân bằng (Mua {ratio*100:.0f}% / Bán {(1-ratio)*100:.0f}%)"
+
+    avg_vol = float(df["vol_ma"].iloc[-1]) if not np.isnan(df["vol_ma"].iloc[-1]) else 1
+    last_vol_ratio = float(df["volume"].iloc[-1]) / max(avg_vol, 1)
+
+    return {"bull_vol": bull_vol, "bear_vol": bear_vol, "ratio": ratio,
+            "bias": bias, "desc": desc, "last_vol_ratio": last_vol_ratio}
+
+def compute_confluence(df1: pd.DataFrame, df5: pd.DataFrame) -> dict:
+    score  = 0
+    detail = []
+
+    def safe(df, col, default=0):
+        v = df.iloc[-1].get(col, default)
+        return default if (v is None or (isinstance(v, float) and np.isnan(v))) else float(v)
+
+    adx1   = safe(df1,"adx",20); di1p = safe(df1,"di_pos",20); di1n = safe(df1,"di_neg",20)
+    ema9_1 = safe(df1,"ema9");   ema21_1 = safe(df1,"ema21"); ema50_1 = safe(df1,"ema50")
+    rsi1   = safe(df1,"rsi",50); macd_h1 = safe(df1,"macd_hist"); macd_sl1 = safe(df1,"macd_slope")
+    bb_up1 = safe(df1,"bb_upper"); bb_lo1 = safe(df1,"bb_lower"); close1 = float(df1["close"].iloc[-1])
+    vwap1  = safe(df1,"vwap"); bb_w1 = safe(df1,"bb_width",0.03); stk1 = safe(df1,"stoch_k",50)
+
+    adx5   = safe(df5,"adx",20); di5p = safe(df5,"di_pos",20); di5n = safe(df5,"di_neg",20)
+    ema9_5 = safe(df5,"ema9");   ema21_5 = safe(df5,"ema21")
+    rsi5   = safe(df5,"rsi",50); macd_h5 = safe(df5,"macd_hist"); macd_sl5 = safe(df5,"macd_slope")
+    close5 = float(df5["close"].iloc[-1])
+
+    if adx5 >= 22:
+        w = min(int((adx5 - 22) / 13 * 25), 25)
+        if di5p > di5n:
+            score += w; detail.append((w, f"ADX 5P={adx5:.1f} DI+>DI- UPTREND",  "#00e676"))
+        else:
+            score -= w; detail.append((w, f"ADX 5P={adx5:.1f} DI->DI+ DOWNTREND","#ff5252"))
+    else:
+        detail.append((0, f"ADX 5P={adx5:.1f} → SIDEWAY (0đ)", "#ffd600"))
+
+    if ema9_1 > ema21_1 > ema50_1:
+        score += 15; detail.append((15,"EMA9>21>50 → BULL 1P","#00e676"))
+    elif ema9_1 < ema21_1 < ema50_1:
+        score -= 15; detail.append((15,"EMA9<21<50 → BEAR 1P","#ff5252"))
+    else:
+        detail.append((0,"EMA chưa xếp hàng rõ","#475569"))
+
+    bull1 = ema9_1 > ema21_1; bull5 = ema9_5 > ema21_5
+    if bull1 and bull5:
+        score += 20; detail.append((20,"EMA 1P & 5P đều BULL → Đồng thuận LONG","#00e676"))
+    elif not bull1 and not bull5:
+        score -= 20; detail.append((20,"EMA 1P & 5P đều BEAR → Đồng thuận SHORT","#ff5252"))
+    else:
+        detail.append((0,"EMA 1P & 5P trái chiều (trung tính)","#475569"))
+
+    if macd_h1 > 0 and macd_sl1 > 0:
+        score += 15; detail.append((15,"MACD Hist+ & dốc lên → Momentum tăng","#00e676"))
+    elif macd_h1 < 0 and macd_sl1 < 0:
+        score -= 15; detail.append((15,"MACD Hist- & dốc xuống → Momentum giảm","#ff5252"))
+    elif macd_h1 > 0:
+        score += 6;  detail.append((6,"MACD Hist dương (slope phẳng)","#38bdf8"))
+    elif macd_h1 < 0:
+        score -= 6;  detail.append((6,"MACD Hist âm (slope phẳng)","#f97316"))
+
+    if 40 <= rsi1 <= 60:
+        detail.append((0,f"RSI={rsi1:.1f} trung tính","#475569"))
+    elif rsi1 < 30:
+        score += 10; detail.append((10,f"RSI={rsi1:.1f} quá bán → LONG bias","#00e676"))
+    elif rsi1 > 70:
+        score -= 10; detail.append((10,f"RSI={rsi1:.1f} quá mua → SHORT bias","#ff5252"))
+    elif rsi1 < 45:
+        score -= 5;  detail.append((5,f"RSI={rsi1:.1f} hơi yếu","#f97316"))
+    elif rsi1 > 55:
+        score += 5;  detail.append((5,f"RSI={rsi1:.1f} hơi mạnh","#38bdf8"))
+
+    div1 = detect_rsi_divergence(df1)
+    div5 = detect_rsi_divergence(df5)
+    if div1["bull"] or div5["bull"]:
+        score += 20; detail.append((20,"RSI Divergence TĂNG → Sắp đảo chiều lên","#00e676"))
+    elif div1["bear"] or div5["bear"]:
+        score -= 20; detail.append((20,"RSI Divergence GIẢM → Sắp đảo chiều xuống","#ff5252"))
+
+    va = analyze_volume_accumulation(df1)
+    if va["bias"] == "BULL":
+        score += 10; detail.append((10,f"Volume Tích Lũy: {va['desc']}","#00e676"))
+    elif va["bias"] == "BEAR":
+        score -= 10; detail.append((10,f"Volume Phân Phối: {va['desc']}","#ff5252"))
+    else:
+        detail.append((0,f"Volume Cân Bằng: {va['desc']}","#475569"))
+
+    if vwap1 > 0:
+        if close1 > vwap1 * 1.001:
+            score += 10; detail.append((10,f"Giá ({close1:.1f}) > VWAP ({vwap1:.1f}) → BULL","#00e676"))
+        elif close1 < vwap1 * 0.999:
+            score -= 10; detail.append((10,f"Giá ({close1:.1f}) < VWAP ({vwap1:.1f}) → BEAR","#ff5252"))
+        else:
+            detail.append((0,f"Giá ≈ VWAP ({vwap1:.1f}) → Trung tính","#475569"))
+
+    if close1 > bb_up1:
+        score += 20; detail.append((20,"Phá BB Trên + Vol spike → Breakout UP","#00e676"))
+    elif close1 < bb_lo1:
+        score -= 20; detail.append((20,"Phá BB Dưới + Vol spike → Breakdown","#ff5252"))
+
+    patterns = detect_candle_patterns(df1)
+    pat_score = 0
+    for p in patterns:
+        if p["bias"] == "BULL":   pat_score += 15
+        elif p["bias"] == "BEAR": pat_score -= 15
+    if pat_score > 0:
+        score += min(pat_score, 15)
+        detail.append((min(pat_score,15), f"Mẫu nến: {', '.join(p['name'] for p in patterns if p['bias']=='BULL')}", "#00e676"))
+    elif pat_score < 0:
+        score += max(pat_score, -15)
+        detail.append((abs(max(pat_score,-15)), f"Mẫu nến: {', '.join(p['name'] for p in patterns if p['bias']=='BEAR')}", "#ff5252"))
+
+    score = max(-100, min(100, score))
+
+    if score >= 70:
+        rec = "LONG MẠNH"; rec_css = "rec-strong-long"; rec_color = "#00e676"
+        rec_desc = "Xác suất cao thị trường tăng mạnh trong 3–5 phiên tới. Ưu tiên vào LONG, pullback về EMA21."
+    elif score >= 40:
+        rec = "NGHIÊNG VỀ LONG"; rec_css = "rec-watch"; rec_color = "#ffd600"
+        rec_desc = "Tín hiệu thiên về tăng nhưng chưa đủ mạnh. Chờ xác nhận thêm hoặc vào lệnh size nhỏ."
+    elif score <= -70:
+        rec = "SHORT MẠNH"; rec_css = "rec-strong-short"; rec_color = "#ff5252"
+        rec_desc = "Xác suất cao thị trường giảm mạnh trong 3–5 phiên tới. Ưu tiên vào SHORT, hồi về EMA21."
+    elif score <= -40:
+        rec = "NGHIÊNG VỀ SHORT"; rec_css = "rec-watch"; rec_color = "#ffd600"
+        rec_desc = "Tín hiệu thiên về giảm nhưng chưa đủ mạnh. Chờ xác nhận hoặc vào size nhỏ."
+    else:
+        rec = "TRUNG TÍNH / CHỜ"; rec_css = "rec-neutral"; rec_color = "#475569"
+        rec_desc = "Tín hiệu mâu thuẫn. Không vào lệnh. Chờ điều kiện hội tụ rõ hơn."
+
+    return {
+        "score": score, "rec": rec, "rec_css": rec_css, "rec_color": rec_color,
+        "rec_desc": rec_desc, "detail": detail,
+        "patterns": patterns, "div1": div1, "div5": div5, "va": va,
+    }
+
+def compute_forecast(df1: pd.DataFrame, df5: pd.DataFrame) -> dict:
+    factors = []
+
+    def safe(df, col, default=0):
+        v = df.iloc[-1].get(col, default)
+        return default if (v is None or (isinstance(v,float) and np.isnan(v))) else float(v)
+
+    adx_now  = safe(df5,"adx",20)
+    adx_prev = float(df5["adx"].iloc[-6]) if len(df5)>6 and not np.isnan(df5["adx"].iloc[-6]) else adx_now
+    adx_rising = adx_now > adx_prev + 2
+    di5p = safe(df5,"di_pos",20); di5n = safe(df5,"di_neg",20)
+    if adx_rising and adx_now > 18:
+        bias = "UP" if di5p > di5n else "DOWN"
+        factors.append({"label":"ADX Tăng dần","desc":f"ADX từ {adx_prev:.1f}→{adx_now:.1f}, xu hướng đang hình thành","bias":bias,"weight":20})
+    else:
+        factors.append({"label":"ADX Phẳng/Giảm","desc":"Xu hướng chưa tăng tốc","bias":"NEUTRAL","weight":0})
+
+    div = detect_rsi_divergence(df5, lookback=40)
+    if div["bull"]:
+        factors.append({"label":"RSI Divergence Tăng","desc":div["desc"],"bias":"UP","weight":25})
+    elif div["bear"]:
+        factors.append({"label":"RSI Divergence Giảm","desc":div["desc"],"bias":"DOWN","weight":25})
+    else:
+        factors.append({"label":"Không có RSI Divergence","desc":"Không phát hiện phân kỳ","bias":"NEUTRAL","weight":0})
+
+    bb_w = safe(df5,"bb_width",0.03)
+    hist_bw = df5["bb_width"].dropna().tail(60)
+    is_sqz  = len(hist_bw)>15 and bb_w < hist_bw.quantile(0.15)
+    ema9_5  = safe(df5,"ema9"); ema21_5 = safe(df5,"ema21")
+    if is_sqz:
+        bias = "UP" if ema9_5 > ema21_5 else "DOWN"
+        factors.append({"label":"BB Squeeze Đang Hình Thành","desc":f"BB Width={bb_w:.4f} < p15={hist_bw.quantile(0.15):.4f} → Bứt phá sắp xảy ra","bias":bias,"weight":20})
+    else:
+        factors.append({"label":"Không có BB Squeeze","desc":"Biên độ bình thường","bias":"NEUTRAL","weight":0})
+
+    va = analyze_volume_accumulation(df5, window=15)
+    if va["bias"] == "BULL":
+        factors.append({"label":"Volume Tích Lũy Mua","desc":va["desc"],"bias":"UP","weight":15})
+    elif va["bias"] == "BEAR":
+        factors.append({"label":"Volume Phân Phối Bán","desc":va["desc"],"bias":"DOWN","weight":15})
+    else:
+        factors.append({"label":"Volume Cân Bằng","desc":va["desc"],"bias":"NEUTRAL","weight":0})
+
+    mh_now  = safe(df5,"macd_hist"); mh_slope = safe(df5,"macd_slope")
+    if mh_slope > 0.05:
+        bias = "UP"
+        factors.append({"label":"MACD Slope Tăng","desc":f"Histogram đang tăng dần (slope={mh_slope:.3f}) → Momentum sắp đảo chiều tăng","bias":"UP","weight":20})
+    elif mh_slope < -0.05:
+        factors.append({"label":"MACD Slope Giảm","desc":f"Histogram đang giảm dần (slope={mh_slope:.3f}) → Momentum sắp đảo chiều giảm","bias":"DOWN","weight":20})
+    else:
+        factors.append({"label":"MACD Slope Phẳng","desc":"Momentum chưa rõ hướng","bias":"NEUTRAL","weight":0})
+
+    up_score   = sum(f["weight"] for f in factors if f["bias"]=="UP")
+    down_score = sum(f["weight"] for f in factors if f["bias"]=="DOWN")
+    total      = up_score + down_score + 1e-9
+    up_prob    = up_score / total * 100
+    down_prob  = down_score / total * 100
+
+    if up_prob >= 70:
+        verdict = "TĂNG MẠNH"; verdict_color = "#00e676"
+        verdict_desc = f"Xác suất TĂNG trong 3–5 phiên: ~{up_prob:.0f}%"
+    elif down_prob >= 70:
+        verdict = "GIẢM MẠNH"; verdict_color = "#ff5252"
+        verdict_desc = f"Xác suất GIẢM trong 3–5 phiên: ~{down_prob:.0f}%"
+    elif up_prob >= 55:
+        verdict = "Hơi TĂNG"; verdict_color = "#ffd600"
+        verdict_desc = f"Thiên về TĂNG ({up_prob:.0f}%) nhưng chưa chắc chắn"
+    elif down_prob >= 55:
+        verdict = "Hơi GIẢM"; verdict_color = "#ffd600"
+        verdict_desc = f"Thiên về GIẢM ({down_prob:.0f}%) nhưng chưa chắc chắn"
+    else:
+        verdict = "TRUNG TÍNH"; verdict_color = "#475569"
+        verdict_desc = "Tín hiệu mâu thuẫn, không dự báo được hướng"
+
+    return {"factors": factors, "up_score": up_score, "down_score": down_score,
+            "up_prob": up_prob, "down_prob": down_prob,
+            "verdict": verdict, "verdict_color": verdict_color, "verdict_desc": verdict_desc}
+
+def compute_winrate() -> dict:
+    closed = [t for t in st.session_state.trade_history if t["status"] == "CLOSED"]
+    if not closed:
+        return {"total": 0, "wins": 0, "losses": 0, "win_rate": 0, "total_pnl": 0,
+                "avg_win": 0, "avg_loss": 0, "expectancy": 0, "profit_factor": 0,
+                "by_regime": {}, "by_direction": {}, "by_signal": {},
+                "equity_curve": [], "max_drawdown": 0, "consecutive_losses": 0}
+
+    wins   = [t for t in closed if t.get("pnl_points", 0) > 0]
+    losses = [t for t in closed if t.get("pnl_points", 0) <= 0]
+    total_pnl     = sum(t.get("pnl_points", 0) for t in closed)
+    avg_win       = float(np.mean([t["pnl_points"] for t in wins]))   if wins   else 0
+    avg_loss      = float(np.mean([t["pnl_points"] for t in losses])) if losses else 0
+    win_rate      = len(wins) / len(closed) * 100
+    gross_profit  = sum(t["pnl_points"] for t in wins)   if wins   else 0
+    gross_loss    = abs(sum(t["pnl_points"] for t in losses)) if losses else 1e-9
+    profit_factor = gross_profit / gross_loss
+    expectancy    = (win_rate / 100 * avg_win) + ((1 - win_rate / 100) * avg_loss)
+
+    by_regime = {}
+    for t in closed:
+        r = t.get("regime", "Không rõ") or "Không rõ"
+        if r not in by_regime:
+            by_regime[r] = {"wins": 0, "total": 0, "pnl": 0}
+        by_regime[r]["total"] += 1
+        by_regime[r]["pnl"]   += t.get("pnl_points", 0)
+        if t.get("pnl_points", 0) > 0:
+            by_regime[r]["wins"] += 1
+    for r in by_regime:
+        by_regime[r]["wr"] = by_regime[r]["wins"] / by_regime[r]["total"] * 100
+
+    by_direction = {}
+    for t in closed:
+        d = t.get("direction", "?")
+        if d not in by_direction:
+            by_direction[d] = {"wins": 0, "total": 0, "pnl": 0}
+        by_direction[d]["total"] += 1
+        by_direction[d]["pnl"]   += t.get("pnl_points", 0)
+        if t.get("pnl_points", 0) > 0:
+            by_direction[d]["wins"] += 1
+    for d in by_direction:
+        by_direction[d]["wr"] = by_direction[d]["wins"] / by_direction[d]["total"] * 100
+
+    by_signal = {}
+    for t in closed:
+        sc = t.get("score", 0)
+        if   abs(sc) >= 70: bucket = "Score ≥70 (Mạnh)"
+        elif abs(sc) >= 40: bucket = "Score 40-69 (Vừa)"
+        else:               bucket = "Score <40 (Yếu)"
+        if bucket not in by_signal:
+            by_signal[bucket] = {"wins": 0, "total": 0, "pnl": 0}
+        by_signal[bucket]["total"] += 1
+        by_signal[bucket]["pnl"]   += t.get("pnl_points", 0)
+        if t.get("pnl_points", 0) > 0:
+            by_signal[bucket]["wins"] += 1
+    for b in by_signal:
+        by_signal[b]["wr"] = by_signal[b]["wins"] / by_signal[b]["total"] * 100
+
+    sorted_closed = sorted(closed, key=lambda x: x.get("exit_time", "00:00:00"))
+    running = 0.0; equity_curve = []
+    for t in sorted_closed:
+        running += t.get("pnl_points", 0)
+        equity_curve.append({"label": f"#{t['id']}", "eq": running})
+
+    peak = 0.0; max_dd = 0.0
+    for pt in equity_curve:
+        if pt["eq"] > peak: peak = pt["eq"]
+        dd = peak - pt["eq"]
+        if dd > max_dd: max_dd = dd
+
+    max_consec = cur_consec = 0
+    for t in sorted_closed:
+        if t.get("pnl_points", 0) <= 0:
+            cur_consec += 1
+            max_consec  = max(max_consec, cur_consec)
+        else:
+            cur_consec = 0
+
+    return {
+        "total": len(closed), "wins": len(wins), "losses": len(losses),
+        "win_rate": win_rate, "total_pnl": total_pnl, "avg_win": avg_win,
+        "avg_loss": avg_loss, "expectancy": expectancy, "profit_factor": profit_factor,
+        "by_regime": by_regime, "by_direction": by_direction, "by_signal": by_signal,
+        "equity_curve": equity_curve, "max_drawdown": max_dd,
+        "consecutive_losses": max_consec,
+    }
+
+def push_alert(score: int, confluence: dict, forecast: dict, price: float, regime: str, threshold: int):
+    if abs(score) < threshold:
+        return
+    prev = st.session_state.alert_last_score
+    if abs(prev) >= threshold and (score > 0) == (prev > 0):
+        return  
+    st.session_state.alert_last_score = score
+    direction = "LONG" if score > 0 else "SHORT"
+    st.session_state.alert_history.insert(0, {
+        "time":    datetime.now(VN_TZ).strftime("%H:%M:%S"),
+        "date":    datetime.now(VN_TZ).strftime("%d/%m/%Y"),
+        "score":   score,
+        "direction": direction,
+        "rec":     confluence["rec"],
+        "price":   price,
+        "regime":  regime,
+        "forecast":forecast["verdict"],
+        "up_prob": forecast["up_prob"],
+        "dn_prob": forecast["down_prob"],
+    })
+    st.session_state.alert_history = st.session_state.alert_history[:100]
+
+def render_alert_banner(score: int, confluence: dict, price: float, muted: bool, threshold: int):
+    if abs(score) < threshold:
+        return
+    if muted:
+        st.markdown(f"""
+        <div class="alert-muted">
+          <span style="color:#475569">🔕 Cảnh báo bị tắt · Score {score:+d}</span>
+        </div>""", unsafe_allow_html=True)
+        return
+
+    is_long   = score > 0
+    css       = "alert-long" if is_long else "alert-short"
+    color     = "#00e676"   if is_long else "#ff5252"
+    icon      = "🚀"        if is_long else "💥"
+    rec       = confluence["rec"]
+    rec_desc  = confluence["rec_desc"]
+
+    top_factors = sorted(confluence["detail"],
+                         key=lambda x: x[0] * (1 if is_long else -1), reverse=True)[:3]
+    factors_html = " &nbsp;·&nbsp; ".join(
+        f'<span style="color:{c}">{lbl.split("→")[0].strip()}</span>'
+        for _, lbl, c in top_factors if lbl
+    )
+
+    st.markdown(f"""
+    <div class="{css}">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-size:22px;font-weight:800;color:{color};letter-spacing:1px">
+            {icon} CẢNH BÁO: {rec}
+          </div>
+          <div style="font-size:12px;color:#94a3b8;margin-top:4px">{rec_desc}</div>
+          <div style="font-size:10px;color:#475569;margin-top:6px">{factors_html}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:28px;font-weight:800;color:{color}">{score:+d}</div>
+          <div style="font-size:10px;color:#475569">/ 100 điểm</div>
+          <div style="font-size:11px;color:{color};margin-top:2px">Giá: {price:.2f}</div>
+        </div>
+      </div>
+    </div>
+    <div style="height:6px"></div>
+    """, unsafe_allow_html=True)
+
+
+def render_alert_history():
+    hist = st.session_state.alert_history
+    if not hist:
+        st.markdown('<div style="color:#334155;font-family:JetBrains Mono;font-size:11px;padding:8px">Chưa có cảnh báo nào. Score cần ≥ |70| để kích hoạt.</div>', unsafe_allow_html=True)
+        return
+
+    st.markdown(f'<div style="font-size:11px;color:#64748b;font-family:JetBrains Mono;margin-bottom:8px">📋 {len(hist)} cảnh báo gần nhất (tối đa 100)</div>', unsafe_allow_html=True)
+
+    for a in hist:
+        is_long = a["direction"] == "LONG"
+        css   = "alert-row-long" if is_long else "alert-row-short"
+        color = "#00e676" if is_long else "#ff5252"
+        icon  = "🚀" if is_long else "💥"
+        fc_c  = "#00e676" if "TĂNG" in a.get("forecast","") else ("#ff5252" if "GIẢM" in a.get("forecast","") else "#ffd600")
+        st.markdown(f"""
+        <div class="{css}">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span>{icon} <b style="color:{color}">Score {a['score']:+d} · {a['rec']}</b>
+              &nbsp;<span style="color:#475569">{a['date']} {a['time']}</span></span>
+            <span style="color:#f1f5f9;font-weight:700">{a['price']:.2f}</span>
+          </div>
+          <div style="display:flex;gap:14px;margin-top:3px;color:#64748b">
+            <span>Regime: <b style="color:{'#00e676' if 'UP' in a.get('regime','') else '#ff5252' if 'DOWN' in a.get('regime','') else '#ffd600'}">{a.get('regime','?')}</b></span>
+            <span>Dự báo: <b style="color:{fc_c}">{a.get('forecast','?')}</b></span>
+            <span>▲{a.get('up_prob',0):.0f}% ▼{a.get('dn_prob',0):.0f}%</span>
+          </div>
+        </div>""", unsafe_allow_html=True)
+
+def detect_regime(df: pd.DataFrame) -> dict:
+    last = df.iloc[-1]
+    def g(col, d=0):
+        v = last.get(col, d)
+        return d if (v is None or (isinstance(v,float) and np.isnan(v))) else float(v)
+    adx=g("adx",20); dip=g("di_pos",20); din=g("di_neg",20)
+    rsi=g("rsi",50); ema9=g("ema9"); ema21=g("ema21"); bbw=g("bb_width",0.03)
+    hist_bw = df["bb_width"].dropna().tail(50)
+    sqz_thresh = hist_bw.quantile(0.15) if len(hist_bw)>10 else 0.0
+    is_sqz = bbw < sqz_thresh
+    regime   = "SIDEWAY" if adx<22 else ("UPTREND" if dip>din else "DOWNTREND")
+    strength = "YẾU" if adx<18 else ("MẠNH" if adx>35 else "VỪA")
+    last_time = df.index[-1].strftime("%H:%M:%S")
+    return {"regime":regime,"strength":strength,"adx":adx,"di_pos":dip,"di_neg":din,
+            "rsi":rsi,"ema9":ema9,"ema21":ema21,"bb_w":bbw,"sqz_thresh":sqz_thresh,
+            "is_sqz":is_sqz,"last_time":last_time,
+            "close":float(last["close"]),"atr":g("atr",2)}
 # 🌟 ĐÃ PHỤC HỒI HÀM GET SIGNAL HISTORY MÀ BẠN YÊU CẦU 🌟
 def get_signal_history(df: pd.DataFrame, tf_label: str) -> list:
     history = []
