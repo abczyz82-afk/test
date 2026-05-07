@@ -146,9 +146,12 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     c, h, l, n = df["close"].values, df["high"].values, df["low"].values, len(df)
 
     def ema(arr, p):
-        r = np.full(len(arr), np.nan); k = 2/(p+1)
-        r[p-1] = arr[:p].mean()
-        for i in range(p, len(arr)): r[i] = arr[i]*k + r[i-1]*(1-k)
+        r = np.full(len(arr), np.nan)
+        start = min(p - 1, len(arr) - 1)
+        r[start] = arr[:start + 1].mean()
+        k = 2 / (p + 1)
+        for i in range(start + 1, len(arr)):
+            r[i] = arr[i] * k + r[i - 1] * (1 - k)
         return r
 
     df["ema9"]  = ema(c, 9)
@@ -1278,12 +1281,4 @@ if auto_refresh:
     if (datetime.now()-st.session_state.last_refresh).seconds >= refresh_sec:
         st.session_state.last_refresh = datetime.now()
         st.rerun()
-def ema(arr, p):
-    r = np.full(len(arr), np.nan)
-    # Tìm điểm đầu tiên có đủ p nến, nếu không đủ thì bắt đầu từ nến đầu tiên
-    start = min(p - 1, len(arr) - 1)
-    r[start] = arr[:start + 1].mean()
-    k = 2 / (p + 1)
-    for i in range(start + 1, len(arr)):
-        r[i] = arr[i] * k + r[i - 1] * (1 - k)
-    return r
+
