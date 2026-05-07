@@ -154,7 +154,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
             r[i] = arr[i] * k + r[i - 1] * (1 - k)
         return r
 
-     df["ema9"]  = ema(c, 9)
+    df["ema9"]  = ema(c, 9)
     df["ema21"] = ema(c, 21)
     df["ema50"] = ema(c, 50)
     df["ema200"]= ema(c, 200)
