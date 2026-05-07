@@ -85,7 +85,7 @@ for k, v in {
         st.session_state[k] = v
 
 # ══════════════════════════════════════════════════════════════
-# DỮ LIỆU – VNSTOCK THỰC + FALLBACK MÔ PHỎNG (Tracking Nguồn)
+# DỮ LIỆU – VNSTOCK THỰC + FALLBACK MÔ PHỎNG
 # ══════════════════════════════════════════════════════════════
 @st.cache_data(ttl=30, show_spinner=False)
 def fetch_data(symbol: str, tf_minutes: int, days_back: int = 7):
@@ -140,18 +140,18 @@ def _simulate(tf_minutes: int, n: int = 350, seed: int = 42) -> pd.DataFrame:
     return df.set_index("time")
 
 # ══════════════════════════════════════════════════════════════
-# CHỈ BÁO KỸ THUẬT - EMA ĐÃ FIX LỖI THIẾU DỮ LIỆU
+# CHỈ BÁO KỸ THUẬT (Đã tích hợp hàm EMA có Fallback thông minh)
 # ══════════════════════════════════════════════════════════════
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     c, h, l, n = df["close"].values, df["high"].values, df["low"].values, len(df)
 
     def ema(arr, p):
-        n = len(arr)
-        r = np.full(n, np.nan)
-        if n == 0:
+        n_arr = len(arr)
+        r = np.full(n_arr, np.nan)
+        if n_arr == 0:
             return r
         k = 2 / (p + 1)
-        if n < p:
+        if n_arr < p:
             # Fallback: Không đủ nến, mượn giá trị nến đầu tiên làm điểm bắt đầu
             r[0] = arr[0]
             start_idx = 1
@@ -160,7 +160,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
             r[p-1] = arr[:p].mean()
             start_idx = p
         # Tính EMA cho các nến tiếp theo
-        for i in range(start_idx, n): 
+        for i in range(start_idx, n_arr): 
             r[i] = arr[i] * k + r[i-1] * (1 - k)
         return r
 
@@ -176,10 +176,16 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["bb_lower"] = rm - 2*rs
     df["bb_width"] = (df["bb_upper"] - df["bb_lower"]) / pd.Series(rm).replace(0, np.nan).values
 
-    d = pd.Series(c).diff()
-    g_ = d.clip(lower=0).rolling(14).mean()
-    l_ = (-d.clip(upper=0)).rolling(14).mean().replace(0, np.nan)
-    df["rsi"] = (100 - 100/(1 + g_/l_)).fillna(50)
+    # Tính RSI chuẩn Wilder
+    delta = df["close"].diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1/14, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1/14, adjust=False).mean()
+    rs_val = avg_gain / avg_loss.replace(0, np.nan)
+    rsi_calc = 100 - (100 / (1 + rs_val))
+    rsi_calc.loc[(avg_loss == 0) & (avg_gain > 0)] = 100
+    df["rsi"] = rsi_calc.ffill().fillna(50)
 
     e12, e26   = ema(c,12), ema(c,26)
     ml         = e12 - e26
@@ -247,7 +253,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 # ══════════════════════════════════════════════════════════════
-# CÁC HÀM XỬ LÝ
+# CÁC HÀM XỬ LÝ (MẪU NẾN & NHẬT KÝ)
 # ══════════════════════════════════════════════════════════════
 PATTERN_BASE_RELIABILITY = {
     "Morning Star":        82, "Evening Star":       80,
@@ -358,6 +364,23 @@ def scan_pattern_history(df: pd.DataFrame, lookback: int = 150) -> list:
             chart_y = (price - offset) if p["bias"] == "BULL" else (price + offset)
             results.append({**p, "time": t, "price": price, "chart_y": chart_y})
     return results
+
+# 🌟 ĐÃ PHỤC HỒI HÀM GET SIGNAL HISTORY MÀ BẠN YÊU CẦU 🌟
+def get_signal_history(df: pd.DataFrame, tf_label: str) -> list:
+    history = []
+    recent_df = df.iloc[-150:] 
+    for i in range(1, len(recent_df)):
+        row = recent_df.iloc[i]
+        t_obj = recent_df.index[i]
+        t_str = t_obj.strftime("%d/%m %H:%M:%S")
+
+        if row.get('ema_buy'): history.append({"_ts": t_obj, "Thời gian": t_str, "Khung": tf_label, "Chỉ báo": "EMA 9/21", "Tín hiệu": "🟢 CẮT LÊN (LONG)"})
+        elif row.get('ema_sell'): history.append({"_ts": t_obj, "Thời gian": t_str, "Khung": tf_label, "Chỉ báo": "EMA 9/21", "Tín hiệu": "🔴 CẮT XUỐNG (SHORT)"})
+        if row.get('macd_buy'): history.append({"_ts": t_obj, "Thời gian": t_str, "Khung": tf_label, "Chỉ báo": "MACD Histogram", "Tín hiệu": "🟢 ĐẢO CHIỀU TĂNG"})
+        elif row.get('macd_sell'): history.append({"_ts": t_obj, "Thời gian": t_str, "Khung": tf_label, "Chỉ báo": "MACD Histogram", "Tín hiệu": "🔴 ĐẢO CHIỀU GIẢM"})
+        if row.get('bb_break_up'): history.append({"_ts": t_obj, "Thời gian": t_str, "Khung": tf_label, "Chỉ báo": "Bollinger Bands", "Tín hiệu": "🚀 BREAK CẠNH TRÊN"})
+        elif row.get('bb_break_dn'): history.append({"_ts": t_obj, "Thời gian": t_str, "Khung": tf_label, "Chỉ báo": "Bollinger Bands", "Tín hiệu": "💥 BREAK CẠNH DƯỚI"})
+    return history
 
 def detect_rsi_divergence(df: pd.DataFrame, lookback: int = 30) -> dict:
     sub = df.dropna(subset=["rsi"]).tail(lookback)
@@ -750,6 +773,8 @@ with chart_col:
         if all_h:
             for item in all_h: del item["_ts"]
             st.dataframe(pd.DataFrame(all_h), use_container_width=True, hide_index=True)
+        else:
+            st.info("Chưa có tín hiệu giao cắt.")
 
     with tab_wr:
         st.markdown('<div class="sec-hdr">📊 WIN RATE & HIỆU SUẤT</div>', unsafe_allow_html=True)
