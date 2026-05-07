@@ -571,6 +571,61 @@ def compute_forecast(df1: pd.DataFrame, df5: pd.DataFrame) -> dict:
 
     return {"factors": factors, "up_score": up_score, "down_score": down_score, "up_prob": up_prob, "down_prob": down_prob, "verdict": verdict, "verdict_color": verdict_color, "verdict_desc": verdict_desc}
 
+def backtest_ai(df: pd.DataFrame, atr_sl_mult=1.0) -> list:
+    trades = []
+    in_trade = False
+    entry_price = 0.0
+    sl = 0.0; tp = 0.0
+    direction = ""
+    entry_time = None
+    
+    for i in range(50, len(df)):
+        row = df.iloc[i]
+        
+        if in_trade:
+            if direction == "LONG":
+                if row["low"] <= sl:
+                    trades.append({"entry_time": entry_time, "exit_time": row.name, "direction": direction, "entry": entry_price, "exit": sl, "pnl_points": sl - entry_price, "reason": "Dính SL", "score": "-"})
+                    in_trade = False
+                elif row["high"] >= tp:
+                    trades.append({"entry_time": entry_time, "exit_time": row.name, "direction": direction, "entry": entry_price, "exit": tp, "pnl_points": tp - entry_price, "reason": "Chốt lời (Dynamic TP)", "score": "-"})
+                    in_trade = False
+            else:
+                if row["high"] >= sl:
+                    trades.append({"entry_time": entry_time, "exit_time": row.name, "direction": direction, "entry": entry_price, "exit": sl, "pnl_points": entry_price - sl, "reason": "Dính SL", "score": "-"})
+                    in_trade = False
+                elif row["low"] <= tp:
+                    trades.append({"entry_time": entry_time, "exit_time": row.name, "direction": direction, "entry": entry_price, "exit": tp, "pnl_points": entry_price - tp, "reason": "Chốt lời (Dynamic TP)", "score": "-"})
+                    in_trade = False
+            continue
+            
+        ob_bull = float(row.get("ob_bull", 0)) == 1.0; fvg_bull = float(row.get("fvg_bull", 0)) == 1.0
+        ob_bear = float(row.get("ob_bear", 0)) == 1.0; fvg_bear = float(row.get("fvg_bear", 0)) == 1.0
+        rsi = float(row.get("rsi", 50)); adx = float(row.get("adx", 20))
+        vol_spike = float(row.get("volume", 0)) > float(row.get("vol_ma", 1)) * 1.5
+        rg = row["high"] - row["low"] + 1e-9
+        lw_ratio = (min(row["open"], row["close"]) - row["low"]) / rg
+        uw_ratio = (row["high"] - max(row["open"], row["close"])) / rg
+        
+        if (ob_bull or fvg_bull) and rsi < 70 and vol_spike and lw_ratio > 0.4:
+            in_trade = True; direction = "LONG"; entry_price = row["close"]; entry_time = row.name
+            atr = float(row.get("atr", 4.0)); sl = entry_price - atr * atr_sl_mult
+            tp_mult = 3.0 if adx > 35 else (2.0 if adx > 25 else 1.0)
+            tp = entry_price + atr * tp_mult
+            
+        elif (ob_bear or fvg_bear) and rsi > 30 and vol_spike and uw_ratio > 0.4:
+            in_trade = True; direction = "SHORT"; entry_price = row["close"]; entry_time = row.name
+            atr = float(row.get("atr", 4.0)); sl = entry_price + atr * atr_sl_mult
+            tp_mult = 3.0 if adx > 35 else (2.0 if adx > 25 else 1.0)
+            tp = entry_price - atr * tp_mult
+
+    if in_trade:
+        last = df.iloc[-1]
+        pts = (last["close"] - entry_price) * (1 if direction=="LONG" else -1)
+        trades.append({"entry_time": entry_time, "exit_time": last.name, "direction": direction, "entry": entry_price, "exit": last["close"], "pnl_points": pts, "reason": "Đóng cuối phiên", "score": "-"})
+        
+    return trades
+
 def compute_winrate() -> dict:
     closed = [t for t in st.session_state.trade_history if t["status"] == "CLOSED"]
     if not closed: return {"total": 0, "wins": 0, "losses": 0, "win_rate": 0, "total_pnl": 0, "avg_win": 0, "avg_loss": 0, "expectancy": 0, "profit_factor": 0, "by_regime": {}, "by_direction": {}, "by_signal": {}, "equity_curve": [], "max_drawdown": 0, "consecutive_losses": 0}
@@ -1146,8 +1201,26 @@ with chart_col:
             
             rows = [{"Vào": f"{t['date']} {t['time']}", "Lệnh": "LONG" if t["direction"]=="LONG" else "SHORT", "Entry": t["entry"], "Exit": t["exit_price"], "P&L": f"{t['pnl_points']:+.1f}", "Score": t["score"]} for t in ai_trades]
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.markdown('<div class="sec-hdr" style="margin-top:20px">🤖 LỊCH SỬ AI TỰ ĐÁNH (BACKTEST MÔ PHỎNG)</div>', unsafe_allow_html=True)
+        st.markdown('<div style="font-size:11px;color:#94a3b8;margin-bottom:12px">Bảng dưới đây mô phỏng lại các lệnh AI SẼ VÀO trong quá khứ. Hệ thống tự động chọn TP1/TP2/TP3 dựa trên ADX (Độ mạnh xu hướng).</div>', unsafe_allow_html=True)
+        
+        sim_trades = backtest_ai(df1)
+        if sim_trades:
+            sim_wins = [t for t in sim_trades if t.get("pnl_points", 0) > 0]
+            sim_wr = len(sim_wins) / len(sim_trades) * 100
+            sim_pnl = sum(t.get("pnl_points", 0) for t in sim_trades)
+            st.markdown(f"""
+            <div style="display:flex;gap:12px;margin-bottom:12px;font-family:'JetBrains Mono';font-size:12px">
+              <div class="metric-box" style="flex:1">Lệnh Mô Phỏng<br><b style="color:#a78bfa;font-size:18px">{len(sim_trades)}</b></div>
+              <div class="metric-box" style="flex:1">Win Rate (Sim)<br><b style="color:{'#00e676' if sim_wr>=50 else '#ff5252'};font-size:18px">{sim_wr:.1f}%</b></div>
+              <div class="metric-box" style="flex:1">Tổng P&L (Sim)<br><b style="color:{'#00e676' if sim_pnl>=0 else '#ff5252'};font-size:18px">{sim_pnl:+.1f}đ</b></div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            sim_rows = [{"Vào (Sim)": t['entry_time'].strftime("%d/%m %H:%M") if pd.notnull(t['entry_time']) else "-", "Lệnh": "LONG" if t["direction"]=="LONG" else "SHORT", "Entry": f"{t['entry']:.1f}", "Exit": f"{t['exit']:.1f}", "P&L": f"{t['pnl_points']:+.1f}", "Kết quả": t["reason"]} for t in sim_trades]
+            st.dataframe(pd.DataFrame(sim_rows), use_container_width=True, hide_index=True)
         else:
-            st.markdown('<div style="font-size:11px;color:#475569">Chưa có lệnh AI nào được đóng.</div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-size:11px;color:#475569">Không có dữ liệu mô phỏng trong quá khứ gần đây.</div>', unsafe_allow_html=True)
 
 with trade_col:
     st.markdown('<div class="sec-hdr">🔫 VÀO LỆNH & QUẢN LÝ</div>', unsafe_allow_html=True)
@@ -1169,16 +1242,28 @@ with trade_col:
         ob_bear = float(df1["ob_bear"].iloc[-1]) == 1.0 if "ob_bear" in df1.columns else False
         fvg_bear = float(df1["fvg_bear"].iloc[-1]) == 1.0 if "fvg_bear" in df1.columns else False
         rsi_val = float(df1["rsi"].iloc[-1])
-        if score >= 70 and (ob_bull or fvg_bull) and rsi_val < 70:
-            reason = f"Phát hiện {'Order Block' if ob_bull else 'FVG'} TĂNG. Cá mập gom hàng, RSI ủng hộ. AI đánh LONG."
+        vol_spike = float(df1["volume"].iloc[-1]) > float(df1["vol_ma"].iloc[-1]) * 1.5
+        rg = df1["high"].iloc[-1] - df1["low"].iloc[-1] + 1e-9
+        lw_ratio = (min(df1["open"].iloc[-1], df1["close"].iloc[-1]) - df1["low"].iloc[-1]) / rg
+        uw_ratio = (df1["high"].iloc[-1] - max(df1["open"].iloc[-1], df1["close"].iloc[-1])) / rg
+        
+        if score >= 70 and (ob_bull or fvg_bull) and rsi_val < 70 and vol_spike and lw_ratio > 0.4:
+            adx_val = regime5["adx"]
+            tp_target = "TP3" if adx_val > 35 else ("TP2" if adx_val > 25 else "TP1")
+            actual_tp = calc_tp3 if adx_val > 35 else (calc_tp2 if adx_val > 25 else calc_tp1)
+            reason = f"Phát hiện {'Order Block' if ob_bull else 'FVG'} TĂNG có Volume lớn + Rút chân dưới (Price Rejection). Trend ADX={adx_val:.1f} chọn {tp_target}."
             st.session_state.ai_journal.insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "date": datetime.now().strftime("%d/%m/%Y"), "action": "Vào LONG", "reason": reason, "price": current_price, "score": score})
-            add_trade("LONG", current_price, current_price+calc_tp1, current_price+calc_tp2, current_price+calc_tp3, current_price-calc_sl, calc_lot_size, score, regime5["regime"], "[AI Đánh]")
+            add_trade("LONG", current_price, current_price+actual_tp, current_price+actual_tp, current_price+actual_tp, current_price-calc_sl, calc_lot_size, score, regime5["regime"], "[AI Đánh]")
             st.rerun()
-        elif score <= -70 and (ob_bear or fvg_bear) and rsi_val > 30:
-            reason = f"Phát hiện {'Order Block' if ob_bear else 'FVG'} GIẢM. Cá mập đạp giá chặn trên, RSI ủng hộ. AI đánh SHORT."
+        elif score <= -70 and (ob_bear or fvg_bear) and rsi_val > 30 and vol_spike and uw_ratio > 0.4:
+            adx_val = regime5["adx"]
+            tp_target = "TP3" if adx_val > 35 else ("TP2" if adx_val > 25 else "TP1")
+            actual_tp = calc_tp3 if adx_val > 35 else (calc_tp2 if adx_val > 25 else calc_tp1)
+            reason = f"Phát hiện {'Order Block' if ob_bear else 'FVG'} GIẢM có Volume lớn + Rút chân trên (Price Rejection). Trend ADX={adx_val:.1f} chọn {tp_target}."
             st.session_state.ai_journal.insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "date": datetime.now().strftime("%d/%m/%Y"), "action": "Vào SHORT", "reason": reason, "price": current_price, "score": score})
-            add_trade("SHORT", current_price, current_price-calc_tp1, current_price-calc_tp2, current_price-calc_tp3, current_price+calc_sl, calc_lot_size, score, regime5["regime"], "[AI Đánh]")
+            add_trade("SHORT", current_price, current_price-actual_tp, current_price-actual_tp, current_price-actual_tp, current_price+calc_sl, calc_lot_size, score, regime5["regime"], "[AI Đánh]")
             st.rerun()
+
 
     c1, c2 = st.columns(2)
     with c1:
