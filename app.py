@@ -1165,28 +1165,90 @@ with st.sidebar:
 # ══════════════════════════════════════════════════════════════
 # LOAD DATA
 # ══════════════════════════════════════════════════════════════
-with st.spinner("Đang tải dữ liệu..."):
-    df1_raw, src1 = fetch_data(symbol, 1,  days_back=3)
-    df5_raw, src5 = fetch_data(symbol, 5,  days_back=7)
+_expiry_info = get_vn30f1m_expiry_info() if "VN30F1M" in symbol else None
+_db1 = smart_days_back(symbol, 1)
+_db5 = smart_days_back(symbol, 5)
 
+_new_contract_warn = ""
+if _expiry_info and _expiry_info["days_since"] <= 3:
+    _new_contract_warn = (
+        f"⚠️ Hợp đồng **{_expiry_info['contract_name']}** mới bắt đầu "
+        f"({_expiry_info['days_since']} ngày) — dữ liệu lịch sử còn ít, "
+        f"chỉ báo sẽ chính xác dần theo thời gian."
+    )
+
+with st.spinner("Đang tải dữ liệu VN30F1M..."):
+    df1_raw = fetch_data(symbol, 1, days_back=_db1)
+    df5_raw = fetch_data(symbol, 5, days_back=_db5)
+
+    MIN_BARS_1 = 50
+    MIN_BARS_5 = 80
+    if len(df1_raw) < MIN_BARS_1 and _db1 < 31:
+        df1_raw = fetch_data_extended(symbol, 1, days_back=min(_db1 * 3, 31))
+    if len(df5_raw) < MIN_BARS_5 and _db5 < 31:
+        df5_raw = fetch_data_extended(symbol, 5, days_back=min(_db5 * 3, 31))
+
+is_simulated = df1_raw.attrs.get("_simulated", False) or df5_raw.attrs.get("_simulated", False)
 if df1_raw.empty or df5_raw.empty:
-    st.error("❌ Không lấy được dữ liệu. Kiểm tra kết nối hoặc chờ thị trường mở cửa.")
-    st.stop()
+    df1_raw = _simulate(1,  n=350, seed=abs(hash(symbol + "1")) % 9999)
+    df5_raw = _simulate(5,  n=350, seed=abs(hash(symbol + "5")) % 9999)
+    is_simulated = True
 
-df1 = add_indicators(df1_raw.copy()); df5 = add_indicators(df5_raw.copy())
+if _new_contract_warn:
+    st.warning(_new_contract_warn)
 
-current_price = float(df1["close"].iloc[-1]); prev_close = float(df1["close"].iloc[-2])
-regime1 = detect_regime(df1); regime5 = detect_regime(df5); current_atr = regime5["atr"]
+if is_simulated:
+    st.warning(
+        "🖥️ **Đang dùng dữ liệu MÔ PHỎNG** — không lấy được dữ liệu thực. "
+        "Kiểm tra kết nối mạng hoặc đảm bảo đã cài đúng bản `vnstock==0.2.8.2`"
+    )
+    with st.expander("🔍 Xem chi tiết lỗi vnstock (debug)"):
+        _exp_info2 = get_vn30f1m_expiry_info()
+        _sym_test  = _exp_info2["exact_symbol"]
+        _start_t   = (datetime.now(VN_TZ) - timedelta(days=5)).strftime("%Y-%m-%d")
+        _end_t     = (datetime.now(VN_TZ) + timedelta(days=1)).strftime("%Y-%m-%d")
+        st.code(f"Symbol thử: {_sym_test}  |  start={_start_t}  end={_end_t}  | res=5", language="text")
+
+        try:
+            from vnstock import stock_historical_data
+            st.success("✅ import vnstock OK")
+            _df2 = stock_historical_data(
+                symbol=_sym_test, start_date=_start_t, end_date=_end_t,
+                resolution="5", type="derivative"
+            )
+            if _df2 is not None and not _df2.empty:
+                st.success(f"✅ Lấy dữ liệu thành công: {len(_df2)} dòng")
+            else:
+                st.error("❌ vnstock trả về rỗng. Có thể do ngoài giờ GD hoặc lỗi server VCI.")
+        except ImportError as _e:
+            st.error(f"❌ Không import được vnstock: {_e}")
+        except Exception as _e:
+            st.error(f"❌ Lỗi khi lấy dữ liệu: {_e}")
+
+df1 = add_indicators(df1_raw.copy())
+df5 = add_indicators(df5_raw.copy())
+
+current_price = float(df1["close"].iloc[-1])
+prev_close    = float(df1["close"].iloc[-2])
+regime1       = detect_regime(df1)
+regime5       = detect_regime(df5)
+current_atr   = regime5["atr"]
 
 auto_check_trades(current_price, auto_tp_target.lower())
-confluence = compute_confluence(df1, df5); forecast = compute_forecast(df1, df5); score = confluence["score"]
 
-ALERT_THRESHOLD = alert_threshold
-push_alert(score, confluence, forecast, current_price, regime5["regime"])
-pat_hist1 = scan_pattern_history(df1, lookback=120); pat_hist5 = scan_pattern_history(df5, lookback=120)
+confluence = compute_confluence(df1, df5)
+forecast   = compute_forecast(df1, df5)
+score      = confluence["score"]
 
-vwap_dev = float(df1["vwap_dev_pct"].iloc[-1]) if "vwap_dev_pct" in df1.columns and not np.isnan(df1["vwap_dev_pct"].iloc[-1]) else 0.0
-vwap_now = float(df1["vwap"].iloc[-1])         if "vwap" in df1.columns and not np.isnan(df1["vwap"].iloc[-1]) else 0.0
+push_alert(score, confluence, forecast, current_price, regime5["regime"], alert_threshold)
+
+pat_hist1 = scan_pattern_history(df1, lookback=120)
+pat_hist5 = scan_pattern_history(df5, lookback=120)
+
+vwap_dev  = float(df1["vwap_dev_pct"].iloc[-1]) if "vwap_dev_pct" in df1.columns and not np.isnan(df1["vwap_dev_pct"].iloc[-1]) else 0.0
+vwap_now  = float(df1["vwap"].iloc[-1])         if "vwap" in df1.columns and not np.isnan(df1["vwap"].iloc[-1]) else 0.0
+
+0
 
 # ══════════════════════════════════════════════════════════════
 # ██ GIAO DIỆN CHÍNH
