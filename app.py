@@ -611,12 +611,12 @@ def compute_broker_advice(df1, df5, score, confluence, forecast, regime1, regime
     elif adx5 < 18: phase = "SIDEWAY_TIGHT"
 
     phase_desc = {
-        "UPTREND_STRONG":   ("🟢 TĂNG TRƯỬNG MẠNH", "#00e676", "Thị trường đang trong pha tăng mạnh, tư bản lớn đang chủ động. Hướng LONG là ưu tiên số 1."),
-        "UPTREND_WEAK":     ("🟡 TĂNG NHẹ", "#ffd600", "Xu hướng tăng nhưng ADX chưa đủ mạnh. Cần chờ xác nhận thêm trước khi vào LONG."),
-        "DOWNTREND_STRONG": ("🔴 GIẢM TRƯỬNG MẠNH", "#ff5252", "Thị trường đang trong pha giảm mạnh, Market Maker đang bán tống. Hướng SHORT là ưu tiên số 1."),
-        "DOWNTREND_WEAK":   ("🟡 GIẢM NHẹ", "#ffd600", "Xu hướng giảm nhưng ADX chưa đủ mạnh. Cần chờ rõ hướng trước khi vào SHORT."),
-        "SIDEWAY":          ("⏸️ ĐI NGANG", "#ffd600", "Thị trường đang dán đồng giá, tay to đang thiết lập vị thế. Chờ bứt phá hoặc đánh dải."),
-        "SIDEWAY_TIGHT":    ("⏸️ SIDEWAY CHẶT (ÉP LOọNG)", "#a78bfa", "BB Squeeze đang hình thành. Đây là giai đoạn tay to ép vự cá nhỏ cắt SL. Chờ bứt phá bốc tiêu, đừng vào trong dải."),
+        "UPTREND_STRONG":   ("🟢 TĂNG TRƯỞNG MẠNH", "#00e676", "Thị trường đang trong pha tăng mạnh, tư bản lớn đang chủ động. Hướng LONG là ưu tiên số 1."),
+        "UPTREND_WEAK":     ("🟡 TĂNG NHẸ", "#ffd600", "Xu hướng tăng nhưng ADX chưa đủ mạnh. Cần chờ xác nhận thêm trước khi vào LONG."),
+        "DOWNTREND_STRONG": ("🔴 GIẢM MẠNH", "#ff5252", "Thị trường đang trong pha giảm mạnh, Market Maker đang bán tống. Hướng SHORT là ưu tiên số 1."),
+        "DOWNTREND_WEAK":   ("🟡 GIẢM NHẸ", "#ffd600", "Xu hướng giảm nhưng ADX chưa đủ mạnh. Cần chờ rõ hướng trước khi vào SHORT."),
+        "SIDEWAY":          ("⏸️ ĐI NGANG", "#ffd600", "Thị trường đang giằng co, tay to đang thiết lập vị thế. Chờ bứt phá hoặc đánh dải."),
+        "SIDEWAY_TIGHT":    ("⏸️ SIDEWAY CHẶT (BB SQUEEZE)", "#a78bfa", "BB Squeeze đang hình thành. Đây là giai đoạn tay to ép vỡ cá nhỏ cắt SL. Chờ bứt phá bùng nổ, đừng vào trong dải."),
     }[phase]
 
     # --- 2. Tính các mức giá quan trọng ---
@@ -632,14 +632,14 @@ def compute_broker_advice(df1, df5, score, confluence, forecast, regime1, regime
     if ema21 > 0:  key_levels.append(("EMA21", ema21, "#38bdf8"))
     key_levels.sort(key=lambda x: abs(x[1] - current_price))
 
-    # --- 3. Tím các mức tự tính S/R ---
+    # --- 3. Tìm các mức tự tính S/R ---
     recent_highs = df1["high"].iloc[-30:]; recent_lows = df1["low"].iloc[-30:]
     nearest_res  = recent_highs[recent_highs > current_price].min() if any(recent_highs > current_price) else bb_upper
     nearest_sup  = recent_lows[recent_lows < current_price].max()   if any(recent_lows < current_price) else bb_lower
 
     # --- 4. Dấu chân tổ chức ---
     mm_signals = []
-    if ob_bull:  mm_signals.append(("⬆ Order Block TĂNG", "#00e676", "Vùng sàn nhọn giá của tay to, thường bật mạnh."))
+    if ob_bull:  mm_signals.append(("⬆ Order Block TĂNG", "#00e676", "Vùng sàn nhận giá của tay to, thường bật mạnh."))
     if ob_bear:  mm_signals.append(("⬇ Order Block GIẢM", "#ff5252", "Vùng trần của tay to, thường đập mạnh."))
     if fvg_bull: mm_signals.append(("↑ FVG TĂNG", "#00e676", "Khoảng trống thanh khoản hướng lên, hút giá."))
     if fvg_bear: mm_signals.append(("↓ FVG GIẢM", "#ff5252", "Khoảng trống thanh khoản hướng xuống, hút giá."))
@@ -647,36 +647,44 @@ def compute_broker_advice(df1, df5, score, confluence, forecast, regime1, regime
     if uw_ratio > 0.45: mm_signals.append(("🐾 Rút chân trên", "#ff5252", f"Đuôi {uw_ratio*100:.0f}% chứng tỏ tay to đẩy giá lên bắn SL rồi kéo xuống."))
     if vol_cur > vol_ma * 2.0: mm_signals.append(("⚡ Vol Đột Biến", "#a78bfa", f"Khối lượng gấp {vol_cur/max(vol_ma,1):.1f}× trung bình - tổ chức đang đặt lệnh lớn."))
     if confluence["div1"]["bull"] or confluence["div5"]["bull"]:
-        mm_signals.append(("📊 RSI Phan kỳ TĂNG", "#00e676", "Giá giảm nhưng RSI tăng - lực giảm đang cạn."))
+        mm_signals.append(("📊 RSI Phân kỳ TĂNG", "#00e676", "Giá giảm nhưng RSI tăng - lực giảm đang cạn."))
     if confluence["div1"]["bear"] or confluence["div5"]["bear"]:
         mm_signals.append(("📊 RSI Phân kỳ GIẢM", "#ff5252", "Giá tăng nhưng RSI giảm - lực tăng đang suy yếu."))
 
-    # --- 5. Tạo Khửửửỳn nghị ---
-    rec_action = "CHờ"; rec_color = "#ffd600"; conviction = 0
+    # --- 5. Tạo Khuyến nghị ---
+    rec_action = "CHỜ"; rec_color = "#ffd600"; conviction = 0
 
     if score >= 70 and (ob_bull or fvg_bull) and rsi1 < 65:
         rec_action = "VÀO LONG - MẠNH"; rec_color = "#00e676"; conviction = 90
+    elif score >= 60 and regime1["regime"] == "UPTREND" and current_price > ema21 and macd_slope > 0:
+        rec_action = "LONG - XÁC NHẬN"; rec_color = "#00e676"; conviction = 75
     elif score >= 40 and regime1["regime"] == "UPTREND" and current_price > ema21:
         rec_action = "NGHIÊNG LONG - PULLBACK"; rec_color = "#00e676"; conviction = 65
+    elif score >= 30 and ema9 > ema21:
+        rec_action = "HƠI NGHIÊNG LONG"; rec_color = "#00e676"; conviction = 50
     elif score <= -70 and (ob_bear or fvg_bear) and rsi1 > 35:
         rec_action = "VÀO SHORT - MẠNH"; rec_color = "#ff5252"; conviction = 90
+    elif score <= -60 and regime1["regime"] == "DOWNTREND" and current_price < ema21 and macd_slope < 0:
+        rec_action = "SHORT - XÁC NHẬN"; rec_color = "#ff5252"; conviction = 75
     elif score <= -40 and regime1["regime"] == "DOWNTREND" and current_price < ema21:
         rec_action = "NGHIÊNG SHORT - HỒI"; rec_color = "#ff5252"; conviction = 65
+    elif score <= -30 and ema9 < ema21:
+        rec_action = "HƠI NGHIÊNG SHORT"; rec_color = "#ff5252"; conviction = 50
     elif phase == "SIDEWAY_TIGHT":
-        rec_action = "CHờ BỤT PHÁ - ĐỮNG VÀO"; rec_color = "#a78bfa"; conviction = 0
+        rec_action = "CHỜ BỨT PHÁ - ĐỪNG VÀO"; rec_color = "#a78bfa"; conviction = 0
     elif abs(score) >= 50:
-        rec_action = "CANHỜN - SIZE NHỢ"; rec_color = "#ffd600"; conviction = 45
+        rec_action = "CẨN THẬN - SIZE NHỎ"; rec_color = "#ffd600"; conviction = 45
 
     # --- 6. Tạo lời bình luận của Broker ---
     notes = []
     if phase in ["UPTREND_STRONG", "UPTREND_WEAK"]:
-        notes.append(f"Thị trường có xu hướng tăng {adx5:.0f} ADX. Đường hướng LONG là ưu tiên của tôi. Mọi khiến SHORT đều phải có xác nhận 2 khung thời gian.")
+        notes.append(f"Thị trường có xu hướng tăng ADX={adx5:.0f}. Hướng LONG là ưu tiên của tôi. Mọi lệnh SHORT đều phải có xác nhận 2 khung thời gian.")
     elif phase in ["DOWNTREND_STRONG", "DOWNTREND_WEAK"]:
         notes.append(f"Xu hướng giảm ADX={adx5:.0f} — đường kháng cự đang đè nặng. Chỉ đánh SHORT theo trend, tránh bắt đáy khi chưa có dấu hiệu bật rõ.")
     else:
-        notes.append("Thị trường đang đi ngang, óc tư duy sắp bén lỡi. Tôi sẽ chờ bứt phá có Volume xác nhận. Lưu ý các mức giá lịch sử (VWAP, BB).")
+        notes.append("Thị trường đang đi ngang, thanh khoản thấp. Tôi sẽ chờ bứt phá có Volume xác nhận. Lưu ý các mức giá lịch sử (VWAP, BB).")
 
-    if rsi1 > 72: notes.append(f"RSI 1P định của phân {rsi1:.0f} — nếu bạn đang nắm LONG, hãy canh chốt. Tay to thường bán táo tợi đây.")
+    if rsi1 > 72: notes.append(f"RSI 1P đang quá mua {rsi1:.0f} — nếu bạn đang nắm LONG, hãy canh chốt. Tay to thường bán mạnh tại đây.")
     elif rsi1 < 28: notes.append(f"RSI 1P quá bán {rsi1:.0f} — cơ hội mua đang xuất hiện. Chờ xác nhận rút chân hướng lên.")
 
     if stoch_k < 20 and regime1["regime"] == "UPTREND": notes.append("Stoch %K đang quá bán trong uptrend — đây là điểm mua phân phối cơ cấu rất hay.")
@@ -685,13 +693,13 @@ def compute_broker_advice(df1, df5, score, confluence, forecast, regime1, regime
     if vol_cur > vol_ma * 1.8: notes.append(f"Khối lượng {vol_cur/max(vol_ma,1):.1f}× TB — có tiền lớn tham gia. Đi theo hướng nến hiện tại.")
 
     if current_price > nearest_res * 0.998: notes.append(f"Giá đang đụng vào kháng cự {nearest_res:.1f} — chú ý phản ứng giá, nếu thử kháng cự quá nhiều lần sẽ phá vỡ.")
-    if current_price < nearest_sup * 1.002: notes.append(f"Giá đang tựa vào hỗ trợ {nearest_sup:.1f} — nếu vỡ và đóng cửng thì điểm breakout giảm.")
+    if current_price < nearest_sup * 1.002: notes.append(f"Giá đang tựa vào hỗ trợ {nearest_sup:.1f} — nếu vỡ và đóng cửa dưới thì breakout giảm.")
 
     # Nhận xét VWAP
     if vwap > 0:
         vwap_pct = (current_price - vwap) / vwap * 100
-        if vwap_pct > 1.5:   notes.append(f"Giá đã cách VWAP +{vwap_pct:.1f}% — buy pressure đang thống trị, nhưng không nên duổi mua xa VWAP quá.")
-        elif vwap_pct < -1.5: notes.append(f"Giá đã cách VWAP {vwap_pct:.1f}% — sell pressure đang thống trị, thường sẽ có phúc hồi về VWAP.")
+        if vwap_pct > 1.5:   notes.append(f"Giá đã cách VWAP +{vwap_pct:.1f}% — buy pressure đang thống trị, nhưng không nên đuổi mua xa VWAP quá.")
+        elif vwap_pct < -1.5: notes.append(f"Giá đã cách VWAP {vwap_pct:.1f}% — sell pressure đang thống trị, thường sẽ có phục hồi về VWAP.")
 
 
     # SL / TP1 / TP2 / TP3
@@ -841,14 +849,23 @@ def backtest_ai(df: pd.DataFrame, atr_sl_mult=1.0) -> tuple:
             body = row["close"] - row["open"]
             vol_spike = float(row.get("volume", 0)) > float(row.get("vol_ma", 1)) * 1.5
             atr = float(row.get("atr", 4.0)); adx = float(row.get("adx", 20))
+            ema9_v = float(row.get("ema9", 0)); ema21_v = float(row.get("ema21", 0))
             
-            vn30_bull_anomaly = body > 3.5 and vol_spike
-            vn30_bear_anomaly = body < -3.5 and vol_spike
+            # Đồng bộ với realtime: ngưỡng 2.5đ, vol 2x, EMA alignment
+            vn30_bull_anomaly = body > 2.5 and vol_spike and ema9_v > ema21_v
+            vn30_bear_anomaly = body < -2.5 and vol_spike and ema9_v < ema21_v
             
-            if (row["close"] > bb_upper or vn30_bull_anomaly) and macd_slope > 0.05 and adx > 25:
+            # Breakout BB xác nhận (close vượt BB ở nến hiện tại, nến trước chưa vượt)
+            prev_close = df.iloc[i-1]["close"] if i > 0 else row["close"]
+            prev_bb_up = float(df.iloc[i-1].get("bb_upper", 9999)) if i > 0 else 9999
+            prev_bb_lo = float(df.iloc[i-1].get("bb_lower", 0)) if i > 0 else 0
+            bb_breakout_long  = row["close"] > bb_upper and prev_close <= prev_bb_up
+            bb_breakout_short = row["close"] < bb_lower and prev_close >= prev_bb_lo
+            
+            if (bb_breakout_long or vn30_bull_anomaly) and macd_slope > 0.02 and adx > 25:
                 in_trade2 = True; dir2 = "LONG"; ep2 = row["close"]; et2 = row.name
                 sl2 = ep2 - atr * atr_sl_mult; tp2 = ep2 + atr * (3.0 if adx > 35 else (2.0 if adx > 25 else 1.0))
-            elif (row["close"] < bb_lower or vn30_bear_anomaly) and macd_slope < -0.05 and adx > 25:
+            elif (bb_breakout_short or vn30_bear_anomaly) and macd_slope < -0.02 and adx > 25:
                 in_trade2 = True; dir2 = "SHORT"; ep2 = row["close"]; et2 = row.name
                 sl2 = ep2 + atr * atr_sl_mult; tp2 = ep2 - atr * (3.0 if adx > 35 else (2.0 if adx > 25 else 1.0))
 
@@ -856,6 +873,56 @@ def backtest_ai(df: pd.DataFrame, atr_sl_mult=1.0) -> tuple:
     if in_trade2: trades_ai2.append({"entry_time": et2, "exit_time": df.iloc[-1].name, "direction": dir2, "entry": ep2, "exit": df.iloc[-1]["close"], "sl": sl2, "tp": tp2, "pnl_points": (df.iloc[-1]["close"] - ep2) * (1 if dir2=="LONG" else -1), "reason": "Đóng cuối phiên", "score": "-"})
         
     return trades_ai1, trades_ai2
+
+def backtest_broker(df: pd.DataFrame) -> list:
+    """Quét dữ liệu quá khứ để tạo lịch sử khuyến nghị Broker (simplified)."""
+    trades = []
+    in_trade = False; direction = ""; entry = 0; sl = 0; tp1 = 0; tp2 = 0; entry_time = None
+
+    for i in range(50, len(df)):
+        row = df.iloc[i]
+        c = row["close"]; o = row["open"]
+        ema9_v = float(row.get("ema9", 0)); ema21_v = float(row.get("ema21", 0))
+        ema50_v = float(row.get("ema50", 0))
+        adx_v = float(row.get("adx", 20)); rsi_v = float(row.get("rsi", 50))
+        atr_v = float(row.get("atr", 2)); macd_h = float(row.get("macd_hist", 0))
+        macd_sl = float(row.get("macd_slope", 0))
+        ob_bull = float(row.get("ob_bull", 0)) == 1; fvg_bull = float(row.get("fvg_bull", 0)) == 1
+        ob_bear = float(row.get("ob_bear", 0)) == 1; fvg_bear = float(row.get("fvg_bear", 0)) == 1
+        vol_spike = float(row.get("volume", 0)) > float(row.get("vol_ma", 1)) * 1.5
+
+        if in_trade:
+            if direction == "LONG":
+                if row["low"] <= sl:
+                    trades.append({"entry_time": entry_time, "exit_time": row.name, "direction": direction, "entry": entry, "exit": sl, "sl": sl, "tp1": tp1, "tp2": tp2, "pnl_points": sl - entry, "reason": "Dính SL"})
+                    in_trade = False
+                elif row["high"] >= tp2:
+                    trades.append({"entry_time": entry_time, "exit_time": row.name, "direction": direction, "entry": entry, "exit": tp2, "sl": sl, "tp1": tp1, "tp2": tp2, "pnl_points": tp2 - entry, "reason": "Chốt TP2"})
+                    in_trade = False
+            else:
+                if row["high"] >= sl:
+                    trades.append({"entry_time": entry_time, "exit_time": row.name, "direction": direction, "entry": entry, "exit": sl, "sl": sl, "tp1": tp1, "tp2": tp2, "pnl_points": entry - sl, "reason": "Dính SL"})
+                    in_trade = False
+                elif row["low"] <= tp2:
+                    trades.append({"entry_time": entry_time, "exit_time": row.name, "direction": direction, "entry": entry, "exit": tp2, "sl": sl, "tp1": tp1, "tp2": tp2, "pnl_points": entry - tp2, "reason": "Chốt TP2"})
+                    in_trade = False
+        else:
+            # Logic Broker simplified: EMA alignment + ADX + RSI + SMC/Volume
+            bull_ema = ema9_v > ema21_v > ema50_v
+            bear_ema = ema9_v < ema21_v < ema50_v
+            
+            if bull_ema and adx_v > 22 and rsi_v < 65 and (ob_bull or fvg_bull or vol_spike) and macd_sl > 0:
+                in_trade = True; direction = "LONG"; entry = c; entry_time = row.name
+                sl = entry - atr_v * 1.2; tp1 = entry + atr_v * 1.5; tp2 = entry + atr_v * 2.5
+            elif bear_ema and adx_v > 22 and rsi_v > 35 and (ob_bear or fvg_bear or vol_spike) and macd_sl < 0:
+                in_trade = True; direction = "SHORT"; entry = c; entry_time = row.name
+                sl = entry + atr_v * 1.2; tp1 = entry - atr_v * 1.5; tp2 = entry - atr_v * 2.5
+
+    if in_trade:
+        last_c = df.iloc[-1]["close"]
+        pnl = (last_c - entry) * (1 if direction == "LONG" else -1)
+        trades.append({"entry_time": entry_time, "exit_time": df.iloc[-1].name, "direction": direction, "entry": entry, "exit": last_c, "sl": sl, "tp1": tp1, "tp2": tp2, "pnl_points": pnl, "reason": "Đang mở"})
+    return trades
 
 def compute_winrate() -> dict:
     closed = [t for t in st.session_state.trade_history if t["status"] == "CLOSED"]
@@ -1918,6 +1985,52 @@ with st.expander("📐 BẢNG TIÊU CHÍ XU HƯỚNG & TÍNH TOÁN THỰC TẾ (
                 save_journal()
                 st.rerun()
 
+        # ── BACKTEST BROKER (Lịch sử quá khứ giống Smart Money AI) ──
+        st.markdown('<div class="sec-hdr" style="margin-top:16px">📊 HIỆU SUẤT BROKER (BACKTEST TRÊN DỮ LIỆU QUÁ KHỨ)</div>', unsafe_allow_html=True)
+        broker_bt = backtest_broker(df1)
+        if broker_bt:
+            bt_wins = [t for t in broker_bt if t["pnl_points"] > 0]
+            bt_losses = [t for t in broker_bt if t["pnl_points"] <= 0]
+            bt_wr = len(bt_wins) / len(broker_bt) * 100 if broker_bt else 0
+            bt_pnl = sum(t["pnl_points"] for t in broker_bt)
+            wr_clr = "#00e676" if bt_wr >= 55 else ("#ff5252" if bt_wr < 45 else "#ffd600")
+
+            bt_c1, bt_c2, bt_c3, bt_c4 = st.columns(4)
+            bt_c1.markdown(f'<div class="metric-box"><div class="metric-label">Tổng lệnh</div><div class="metric-value white">{len(broker_bt)}</div></div>', unsafe_allow_html=True)
+            bt_c2.markdown(f'<div class="metric-box"><div class="metric-label">Win Rate</div><div class="metric-value" style="color:{wr_clr}">{bt_wr:.1f}%</div></div>', unsafe_allow_html=True)
+            bt_c3.markdown(f'<div class="metric-box"><div class="metric-label">Tổng PnL (điểm)</div><div class="metric-value {"green" if bt_pnl>0 else "red"}">{bt_pnl:+.1f}</div></div>', unsafe_allow_html=True)
+            avg_w = np.mean([t["pnl_points"] for t in bt_wins]) if bt_wins else 0
+            avg_l = np.mean([t["pnl_points"] for t in bt_losses]) if bt_losses else 0
+            bt_c4.markdown(f'<div class="metric-box"><div class="metric-label">TB Win/Loss</div><div class="metric-value white">{avg_w:+.1f} / {avg_l:.1f}</div></div>', unsafe_allow_html=True)
+
+            bt_html = """<table style="width:100%;border-collapse:collapse;font-family:'JetBrains Mono',monospace;font-size:10px">
+            <thead><tr style="border-bottom:1px solid #1a2540;color:#475569">
+              <th style="padding:4px 6px;text-align:left">Vào lệnh</th>
+              <th style="padding:4px 6px;text-align:center">Hướng</th>
+              <th style="padding:4px 6px;text-align:right">Entry</th>
+              <th style="padding:4px 6px;text-align:right">SL</th>
+              <th style="padding:4px 6px;text-align:right">TP2</th>
+              <th style="padding:4px 6px;text-align:right">PnL</th>
+              <th style="padding:4px 6px;text-align:center">Kết quả</th>
+            </tr></thead><tbody>"""
+            for t in broker_bt[-15:]:
+                t_clr = "#00e676" if t["direction"] == "LONG" else "#ff5252"
+                pnl_clr = "#00e676" if t["pnl_points"] > 0 else "#ff5252"
+                et_str = t["entry_time"].strftime("%d/%m %H:%M") if hasattr(t["entry_time"], "strftime") else str(t["entry_time"])[:11]
+                bt_html += f"""<tr style="border-bottom:1px solid #0f1626">
+                  <td style="padding:4px 6px;color:#64748b">{et_str}</td>
+                  <td style="padding:4px 6px;text-align:center;color:{t_clr};font-weight:700">{t['direction']}</td>
+                  <td style="padding:4px 6px;text-align:right;color:#f1f5f9">{t['entry']:.1f}</td>
+                  <td style="padding:4px 6px;text-align:right;color:#ff5252">{t['sl']:.1f}</td>
+                  <td style="padding:4px 6px;text-align:right;color:#00e676">{t['tp2']:.1f}</td>
+                  <td style="padding:4px 6px;text-align:right;color:{pnl_clr};font-weight:700">{t['pnl_points']:+.1f}</td>
+                  <td style="padding:4px 6px;text-align:center">{t['reason']}</td>
+                </tr>"""
+            bt_html += "</tbody></table>"
+            st.markdown(f'<div style="background:#0f1626;border:1px solid #1a2540;border-radius:8px;padding:10px;margin-top:8px">{bt_html}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div style="color:#334155;font-size:11px;font-family:JetBrains Mono;padding:8px">Chưa đủ dữ liệu để backtest Broker.</div>', unsafe_allow_html=True)
+
 
 # ══════════════════════════════════════════════════════════════
 # FOOTER + AUTO REFRESH
@@ -1928,7 +2041,7 @@ _src_label = f"📡 {src1}"
 _hrs_label = " · ● Đang GD" if is_trading_hours() else " · ○ Ngoài giờ"
 fl.markdown(
     f'<div style="font-size:10px;color:#475569;font-family:JetBrains Mono">'
-    f'VN30F Terminal v4 · Trạng thái: <span style="color:#00e676">{_src_label}</span>{_hrs_label} · '
+    f'VN30F Terminal v5 🧠 · Trạng thái: <span style="color:#00e676">{_src_label}</span>{_hrs_label} · '
     f'{datetime.now().strftime("%d/%m/%Y %H:%M:%S")}</div>',
     unsafe_allow_html=True
 )
