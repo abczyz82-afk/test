@@ -611,7 +611,7 @@ def build_chart(df, title, show_ema, show_bb, show_signals, show_trades, show_vw
         pats_in_view = [p for p in pattern_history if p["time"] in df_times]
         for bias_f, sym_f, color_f, leg_f in [("BULL", "triangle-up", "#00c853", "Mẫu TĂNG"), ("BEAR", "triangle-down", "#d50000", "Mẫu GIẢM"), ("NEUTRAL", "diamond", "#ffd600", "Mẫu Trung tính")]:
             grp = [p for p in pats_in_view if p["bias"] == bias_f]
-            if grp: fig.add_trace(go.Scatter(x=[p["time"] for p in grp], y=[p["chart_y"] for p in grp], mode="markers+text", marker=dict(symbol=sym_f, size=13, color=color_f, line=dict(color=BG, width=1.5)), text=[p["name"][:4] for p in grp], textposition="bottom center" if bias_f=="BULL" else "top center", textfont=dict(size=8, color=color_f), hoverinfo="text", name=leg_f), row=1, col=1)
+            if grp: fig.add_trace(go.Scatter(x=[p["time"] for p in grp], y=[p["chart_y"] for p in grp], mode="markers+text", marker=dict(symbol=sym_f, size=13, color=color_f, line=dict(color=BG, width=1.5)), text=[p["name"][:4] for p in grp], textposition="bottom center" if bias_f=="BULL" else "top center", textfont=dict(size=8, color=color_f), hovertext=[f"<b>{p['name']}</b><br>{p['desc']}<br>Độ tin cậy: {p['reliability']}% (Chất lượng {p['quality']})<br>Context bonus: +{p.get('context_bonus', 0)}%<br>Giá: {p['price']:.2f}" for p in grp], hoverinfo="text", name=leg_f), row=1, col=1)
 
     if show_bb:
         fig.add_trace(go.Scatter(x=df.index, y=df["bb_upper"], line=dict(color="#475569",width=1,dash="dot"), showlegend=False), row=1, col=1)
