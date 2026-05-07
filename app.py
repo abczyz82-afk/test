@@ -78,8 +78,27 @@ section[data-testid="stSidebar"] *{color:#c0ccdf!important;}
 # ══════════════════════════════════════════════════════════════
 # SESSION STATE
 # ══════════════════════════════════════════════════════════════
+import json
+import os
+JOURNAL_FILE = "smc_journal.json"
+
+def load_journal():
+    if os.path.exists(JOURNAL_FILE):
+        try:
+            with open(JOURNAL_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception: pass
+    return {"trade_history": [], "ai_journal": []}
+
+def save_journal():
+    with open(JOURNAL_FILE, "w", encoding="utf-8") as f:
+        json.dump({"trade_history": st.session_state.trade_history, "ai_journal": st.session_state.ai_journal}, f, ensure_ascii=False, indent=2)
+
+journal_data = load_journal()
+
 for k, v in {
-    "trade_history":    [],
+    "trade_history":    journal_data["trade_history"],
+    "ai_journal":       journal_data["ai_journal"],
     "last_refresh":     datetime.now(),
     "signal_history":   [],
     "prev_sig_keys":    set(),
@@ -693,12 +712,14 @@ def build_chart(df, title, show_ema, show_bb, show_signals, show_trades, show_vw
 
 def add_trade(direction, entry, tp1, tp2, tp3, sl, size, score=0, regime="", signal_tag="Thủ công"):
     st.session_state.trade_history.insert(0, {"id": len(st.session_state.trade_history) + 1, "date": datetime.now().strftime("%d/%m/%Y"), "time": datetime.now().strftime("%H:%M:%S"), "exit_time": "-", "direction": direction, "entry": entry, "tp1": tp1, "tp2": tp2, "tp3": tp3, "sl": sl, "size": size, "status": "OPEN", "exit_price": 0.0, "pnl_points": 0.0, "pnl": 0.0, "reason": "-", "score": score, "regime": regime, "signal_tag": signal_tag})
+    save_journal()
 
 def close_trade(idx, exit_price, reason="Đóng thủ công"):
     t = st.session_state.trade_history[idx]
     if t["status"] != "OPEN": return
     pts = (exit_price - t["entry"]) * (1 if t["direction"]=="LONG" else -1)
     t.update({"status":"CLOSED","exit_price":exit_price,"exit_time":datetime.now().strftime("%H:%M:%S"), "reason":reason,"pnl_points":pts,"pnl":pts*t["size"]*100_000})
+    save_journal()
 
 def auto_check_trades(cp, target_tp):
     for i, t in enumerate(st.session_state.trade_history):
@@ -730,6 +751,7 @@ with st.sidebar:
     show_patterns   = st.toggle("🕯️ Mẫu nến trên chart", value=True)
 
     st.markdown('<div class="sec-hdr" style="margin-top:14px">🤖 QUẢN LÝ VỐN & RỦI RO</div>', unsafe_allow_html=True)
+    ai_enabled = st.toggle("🧠 Bật Smart Money AI (Tự đánh)", value=False)
     account_size = st.number_input("Tổng vốn (VNĐ)", min_value=10_000_000, value=100_000_000, step=10_000_000)
     risk_percent = st.number_input("Rủi ro % mỗi lệnh", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
     auto_sltp = st.toggle("Bot tự tính SL/TP theo ATR", value=True)
@@ -804,7 +826,7 @@ with score_col:
 chart_col, trade_col = st.columns([3.2, 1.2])
 
 with chart_col:
-    tab1, tab5, tab_pat, tab_sig, tab_wr, tab_alert = st.tabs(["📊 Biểu đồ 1P", "📊 Biểu đồ 5P", "🕯️ Mẫu nến", "🔔 Lịch sử tín hiệu", "📈 Win Rate", "🚨 Cảnh báo"])
+    tab1, tab5, tab_pat, tab_sig, tab_wr, tab_alert, tab_ai = st.tabs(["📊 Biểu đồ 1P", "📊 Biểu đồ 5P", "🕯️ Mẫu nến", "🔔 Lịch sử tín hiệu", "📈 Win Rate", "🚨 Cảnh báo", "🧠 Smart Money AI"])
     with tab1: st.plotly_chart(build_chart(df1, f"{symbol}·1P", show_ema, show_bb, show_signals, show_trades, show_vwap, show_vwap_bands, show_patterns, score, pattern_history=pat_hist1), use_container_width=True, config={"displayModeBar": False})
     with tab5: st.plotly_chart(build_chart(df5, f"{symbol}·5P", show_ema, show_bb, show_signals, show_trades, show_vwap, show_vwap_bands, show_patterns, score, pattern_history=pat_hist5), use_container_width=True, config={"displayModeBar": False})
     
@@ -1088,6 +1110,45 @@ with chart_col:
           • Tắt banner bằng toggle "🔕 Tắt banner cảnh báo"
         </div>""", unsafe_allow_html=True)
 
+    with tab_ai:
+        st.markdown('<div class="sec-hdr">🧠 NHẬT KÝ MARKET MAKER & LỆNH AI</div>', unsafe_allow_html=True)
+        st.markdown('<div style="font-size:11px;color:#94a3b8;margin-bottom:12px">Bảng điện tư duy của AI khi quét thanh khoản (Liquidity) và tìm kiếm dấu chân Cá mập. Lịch sử này được lưu vĩnh viễn.</div>', unsafe_allow_html=True)
+        
+        if not st.session_state.ai_journal:
+            st.info("AI chưa phát hiện dấu chân của Market Maker.")
+        else:
+            for note in st.session_state.ai_journal:
+                c = "#00e676" if "LONG" in note["action"] else "#ff5252"
+                st.markdown(f"""
+                <div style="background:#0f1626;border-left:3px solid {c};border-radius:4px;padding:10px;margin-bottom:6px;font-family:'JetBrains Mono';font-size:11px">
+                  <div style="display:flex;justify-content:space-between">
+                    <span style="color:{c};font-weight:700">{note['action']} @ {note['price']:.1f}</span>
+                    <span style="color:#64748b">{note['date']} {note['time']}</span>
+                  </div>
+                  <div style="color:#dde4f0;margin-top:6px">{note['reason']}</div>
+                  <div style="color:#38bdf8;margin-top:4px;font-size:10px">Confluence Score: {note['score']:+d}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+        st.markdown('<div class="sec-hdr" style="margin-top:20px">📈 HIỆU SUẤT CỦA AI</div>', unsafe_allow_html=True)
+        ai_trades = [t for t in st.session_state.trade_history if t["signal_tag"] == "[AI Đánh]" and t["status"] == "CLOSED"]
+        if ai_trades:
+            wins = [t for t in ai_trades if t.get("pnl_points", 0) > 0]
+            wr = len(wins) / len(ai_trades) * 100
+            total_pnl = sum(t.get("pnl_points", 0) for t in ai_trades)
+            st.markdown(f"""
+            <div style="display:flex;gap:12px;margin-bottom:12px;font-family:'JetBrains Mono';font-size:12px">
+              <div class="metric-box" style="flex:1">Tổng Lệnh<br><b style="color:#38bdf8;font-size:18px">{len(ai_trades)}</b></div>
+              <div class="metric-box" style="flex:1">Win Rate<br><b style="color:{'#00e676' if wr>=50 else '#ff5252'};font-size:18px">{wr:.1f}%</b></div>
+              <div class="metric-box" style="flex:1">Tổng P&L<br><b style="color:{'#00e676' if total_pnl>=0 else '#ff5252'};font-size:18px">{total_pnl:+.1f}đ</b></div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            rows = [{"Vào": f"{t['date']} {t['time']}", "Lệnh": "LONG" if t["direction"]=="LONG" else "SHORT", "Entry": t["entry"], "Exit": t["exit_price"], "P&L": f"{t['pnl_points']:+.1f}", "Score": t["score"]} for t in ai_trades]
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.markdown('<div style="font-size:11px;color:#475569">Chưa có lệnh AI nào được đóng.</div>', unsafe_allow_html=True)
+
 with trade_col:
     st.markdown('<div class="sec-hdr">🔫 VÀO LỆNH & QUẢN LÝ</div>', unsafe_allow_html=True)
     if auto_sltp:
@@ -1101,6 +1162,24 @@ with trade_col:
     entry_price = st.number_input("Giá vào", value=float(f"{current_price:.2f}"), step=0.1)
     
     open_exist = any(t["status"] == "OPEN" for t in st.session_state.trade_history)
+
+    if ai_enabled and is_trading_hours() and not open_exist:
+        ob_bull = float(df1["ob_bull"].iloc[-1]) == 1.0 if "ob_bull" in df1.columns else False
+        fvg_bull = float(df1["fvg_bull"].iloc[-1]) == 1.0 if "fvg_bull" in df1.columns else False
+        ob_bear = float(df1["ob_bear"].iloc[-1]) == 1.0 if "ob_bear" in df1.columns else False
+        fvg_bear = float(df1["fvg_bear"].iloc[-1]) == 1.0 if "fvg_bear" in df1.columns else False
+        rsi_val = float(df1["rsi"].iloc[-1])
+        if score >= 70 and (ob_bull or fvg_bull) and rsi_val < 70:
+            reason = f"Phát hiện {'Order Block' if ob_bull else 'FVG'} TĂNG. Cá mập gom hàng, RSI ủng hộ. AI đánh LONG."
+            st.session_state.ai_journal.insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "date": datetime.now().strftime("%d/%m/%Y"), "action": "Vào LONG", "reason": reason, "price": current_price, "score": score})
+            add_trade("LONG", current_price, current_price+calc_tp1, current_price+calc_tp2, current_price+calc_tp3, current_price-calc_sl, calc_lot_size, score, regime5["regime"], "[AI Đánh]")
+            st.rerun()
+        elif score <= -70 and (ob_bear or fvg_bear) and rsi_val > 30:
+            reason = f"Phát hiện {'Order Block' if ob_bear else 'FVG'} GIẢM. Cá mập đạp giá chặn trên, RSI ủng hộ. AI đánh SHORT."
+            st.session_state.ai_journal.insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "date": datetime.now().strftime("%d/%m/%Y"), "action": "Vào SHORT", "reason": reason, "price": current_price, "score": score})
+            add_trade("SHORT", current_price, current_price-calc_tp1, current_price-calc_tp2, current_price-calc_tp3, current_price+calc_sl, calc_lot_size, score, regime5["regime"], "[AI Đánh]")
+            st.rerun()
+
     c1, c2 = st.columns(2)
     with c1:
         if st.button("🟢 LONG", use_container_width=True, disabled=open_exist): 
