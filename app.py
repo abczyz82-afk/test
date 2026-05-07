@@ -1165,49 +1165,28 @@ with st.sidebar:
 # ══════════════════════════════════════════════════════════════
 # LOAD DATA
 # ══════════════════════════════════════════════════════════════
-_db1 = smart_days_back(symbol, 1)
-_db5 = smart_days_back(symbol, 5)
-
-_new_contract_warn = ""
 with st.spinner("Đang tải dữ liệu..."):
-    df1_raw = fetch_data(symbol, 1, days_back=_db1)
-    df5_raw = fetch_data(symbol, 5, days_back=_db5)
-    MIN_BARS_1 = 50
-    MIN_BARS_5 = 80
+    df1_raw, src1 = fetch_data(symbol, 1,  days_back=3)
+    df5_raw, src5 = fetch_data(symbol, 5,  days_back=7)
 
-if len(df1_raw) < MIN_BARS_1 and _db1 < 31:
-        df1_raw = fetch_data_extended(symbol, 1, days_back=min(_db1 * 3, 31))
-    if len(df5_raw) < MIN_BARS_5 and _db5 < 31:
-        df5_raw = fetch_data_extended(symbol, 5, days_back=min(_db5 * 3, 31))
-
-is_simulated = df1_raw.attrs.get("_simulated", False) or df5_raw.attrs.get("_simulated", False)
 if df1_raw.empty or df5_raw.empty:
-    df1_raw = _simulate(1,  n=350, seed=abs(hash(symbol + "1")) % 9999)
-    df5_raw = _simulate(5,  n=350, seed=abs(hash(symbol + "5")) % 9999)
-    is_simulated = True
-df1 = add_indicators(df1_raw.copy())
-df5 = add_indicators(df5_raw.copy())
+    st.error("❌ Không lấy được dữ liệu. Kiểm tra kết nối hoặc chờ thị trường mở cửa.")
+    st.stop()
 
-current_price = float(df1["close"].iloc[-1])
-prev_close    = float(df1["close"].iloc[-2])
-regime1       = detect_regime(df1)
-regime5       = detect_regime(df5)
-current_atr   = regime5["atr"]
+df1 = add_indicators(df1_raw.copy()); df5 = add_indicators(df5_raw.copy())
+
+current_price = float(df1["close"].iloc[-1]); prev_close = float(df1["close"].iloc[-2])
+regime1 = detect_regime(df1); regime5 = detect_regime(df5); current_atr = regime5["atr"]
 
 auto_check_trades(current_price, auto_tp_target.lower())
+confluence = compute_confluence(df1, df5); forecast = compute_forecast(df1, df5); score = confluence["score"]
 
-confluence = compute_confluence(df1, df5)
-forecast   = compute_forecast(df1, df5)
-score      = confluence["score"]
+ALERT_THRESHOLD = alert_threshold
+push_alert(score, confluence, forecast, current_price, regime5["regime"])
+pat_hist1 = scan_pattern_history(df1, lookback=120); pat_hist5 = scan_pattern_history(df5, lookback=120)
 
-push_alert(score, confluence, forecast, current_price, regime5["regime"], alert_threshold)
-
-pat_hist1 = scan_pattern_history(df1, lookback=120)
-pat_hist5 = scan_pattern_history(df5, lookback=120)
-
-vwap_dev  = float(df1["vwap_dev_pct"].iloc[-1]) if "vwap_dev_pct" in df1.columns and not np.isnan(df1["vwap_dev_pct"].iloc[-1]) else 0.0
-vwap_now  = float(df1["vwap"].iloc[-1])         if "vwap" in df1.columns and not np.isnan(df1["vwap"].iloc[-1]) else 0.0
-
+vwap_dev = float(df1["vwap_dev_pct"].iloc[-1]) if "vwap_dev_pct" in df1.columns and not np.isnan(df1["vwap_dev_pct"].iloc[-1]) else 0.0
+vwap_now = float(df1["vwap"].iloc[-1])         if "vwap" in df1.columns and not np.isnan(df1["vwap"].iloc[-1]) else 0.0
 
 # ══════════════════════════════════════════════════════════════
 # ██ GIAO DIỆN CHÍNH
