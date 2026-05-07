@@ -89,12 +89,10 @@ for k, v in {
 # ══════════════════════════════════════════════════════════════
 @st.cache_data(ttl=30, show_spinner=False)
 def fetch_data(symbol: str, tf_minutes: int, days_back: int = 7):
-    """Thử vnstock3 → vnstock cũ → fallback mô phỏng. Trả về df và tên thư viện."""
     today      = datetime.now().strftime("%Y-%m-%d")
     start_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
     source_used = "Mô phỏng (Fallback)"
 
-    # --- Thử vnstock3 (phiên bản mới nhất) ---
     try:
         from vnstock3 import Vnstock
         vn = Vnstock().stock(symbol=symbol, source="VCI")
@@ -108,7 +106,6 @@ def fetch_data(symbol: str, tf_minutes: int, days_back: int = 7):
     except Exception:
         pass
 
-    # --- Thử vnstock cũ (0.2.x) ---
     try:
         from vnstock import stock_historical_data
         df = stock_historical_data(symbol=symbol, start_date=start_date, end_date=today,
@@ -120,7 +117,6 @@ def fetch_data(symbol: str, tf_minutes: int, days_back: int = 7):
     except Exception:
         pass
 
-    # --- Fallback mô phỏng ---
     return _simulate(tf_minutes, n=350, seed=hash(symbol + str(tf_minutes)) % 9999), source_used
 
 
@@ -144,24 +140,35 @@ def _simulate(tf_minutes: int, n: int = 350, seed: int = 42) -> pd.DataFrame:
     return df.set_index("time")
 
 # ══════════════════════════════════════════════════════════════
-# CHỈ BÁO KỸ THUẬT - TỐI ƯU HÓA VECTORIZATION
+# CHỈ BÁO KỸ THUẬT - EMA ĐÃ FIX LỖI THIẾU DỮ LIỆU
 # ══════════════════════════════════════════════════════════════
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     c, h, l, n = df["close"].values, df["high"].values, df["low"].values, len(df)
 
     def ema(arr, p):
-        r = np.full(len(arr), np.nan); k = 2/(p+1)
-        r[p-1] = arr[:p].mean()
-        for i in range(p, len(arr)): r[i] = arr[i]*k + r[i-1]*(1-k)
+        n = len(arr)
+        r = np.full(n, np.nan)
+        if n == 0:
+            return r
+        k = 2 / (p + 1)
+        if n < p:
+            # Fallback: Không đủ nến, mượn giá trị nến đầu tiên làm điểm bắt đầu
+            r[0] = arr[0]
+            start_idx = 1
+        else:
+            # Chuẩn xác: Lấy giá trị trung bình của p nến đầu tiên làm điểm bắt đầu
+            r[p-1] = arr[:p].mean()
+            start_idx = p
+        # Tính EMA cho các nến tiếp theo
+        for i in range(start_idx, n): 
+            r[i] = arr[i] * k + r[i-1] * (1 - k)
         return r
 
-    # EMAs
     df["ema9"]  = ema(c, 9)
     df["ema21"] = ema(c, 21)
     df["ema50"] = ema(c, 50)
     df["ema200"]= ema(c, 200)
 
-    # Bollinger Bands
     rm = pd.Series(c).rolling(20).mean().values
     rs = pd.Series(c).rolling(20).std().values
     df["bb_mid"]   = rm
@@ -169,13 +176,11 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["bb_lower"] = rm - 2*rs
     df["bb_width"] = (df["bb_upper"] - df["bb_lower"]) / pd.Series(rm).replace(0, np.nan).values
 
-    # RSI
     d = pd.Series(c).diff()
     g_ = d.clip(lower=0).rolling(14).mean()
     l_ = (-d.clip(upper=0)).rolling(14).mean().replace(0, np.nan)
     df["rsi"] = (100 - 100/(1 + g_/l_)).fillna(50)
 
-    # MACD
     e12, e26   = ema(c,12), ema(c,26)
     ml         = e12 - e26
     df["macd"]        = ml
@@ -183,7 +188,6 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["macd_hist"]   = ml - df["macd_signal"].values
     df["macd_slope"]  = pd.Series(df["macd_hist"].values).diff(3)   
 
-    # ATR / ADX / DI (Đã Vector hóa 100% thay vì dùng apply)
     df["prev_close"] = df["close"].shift(1)
     df['tr1'] = df['high'] - df['low']
     df['tr2'] = (df['high'] - df['prev_close']).abs()
@@ -204,12 +208,10 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["dx"]     = 100 * (df["di_pos"]-df["di_neg"]).abs() / (df["di_pos"]+df["di_neg"]).replace(0, np.nan)
     df["adx"]    = rma(df["dx"], 14)
 
-    # Stochastic
     lo14 = pd.Series(l).rolling(14).min(); hi14 = pd.Series(h).rolling(14).max()
     k_   = (pd.Series(c)-lo14)/(hi14-lo14+1e-9)*100
     df["stoch_k"] = k_.rolling(3).mean(); df["stoch_d"] = df["stoch_k"].rolling(3).mean()
 
-    # ── VWAP + Bands (reset theo ngày) ──
     df["date_"]  = df.index.date
     df["tp_"]    = (df["high"] + df["low"] + df["close"]) / 3
     df["cum_tv"] = (df["tp_"] * df["volume"]).groupby(df["date_"]).cumsum()
@@ -235,7 +237,6 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     df["vol_ma"] = pd.Series(df["volume"].values).rolling(20).mean().values
 
-    # Tín hiệu cắt
     df["ema_buy"]     = (df["ema9"]>df["ema21"]) & (df["ema9"].shift(1)<=df["ema21"].shift(1))
     df["ema_sell"]    = (df["ema9"]<df["ema21"]) & (df["ema9"].shift(1)>=df["ema21"].shift(1))
     df["macd_buy"]    = (df["macd_hist"]>0)  & (df["macd_hist"].shift(1)<=0)
@@ -246,7 +247,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 # ══════════════════════════════════════════════════════════════
-# CÁC HÀM XỬ LÝ (GIỮ NGUYÊN TỪ BẢN V3)
+# CÁC HÀM XỬ LÝ
 # ══════════════════════════════════════════════════════════════
 PATTERN_BASE_RELIABILITY = {
     "Morning Star":        82, "Evening Star":       80,
