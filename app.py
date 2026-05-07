@@ -243,6 +243,14 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     df["vol_ma"] = pd.Series(df["volume"].values).rolling(20).mean().values
 
+    # SMC - FVG & OB
+    df["fvg_bull"] = (df["low"] > df["high"].shift(2)) & (df["close"] > df["open"])
+    df["fvg_bear"] = (df["high"] < df["low"].shift(2)) & (df["close"] < df["open"])
+    momentum_bull = (df["close"] - df["open"]) > df["atr"] * 1.5
+    df["ob_bull"] = momentum_bull & (df["close"].shift(1) < df["open"].shift(1))
+    momentum_bear = (df["open"] - df["close"]) > df["atr"] * 1.5
+    df["ob_bear"] = momentum_bear & (df["close"].shift(1) > df["open"].shift(1))
+
     df["ema_buy"]     = (df["ema9"]>df["ema21"]) & (df["ema9"].shift(1)<=df["ema21"].shift(1))
     df["ema_sell"]    = (df["ema9"]<df["ema21"]) & (df["ema9"].shift(1)>=df["ema21"].shift(1))
     df["macd_buy"]    = (df["macd_hist"]>0)  & (df["macd_hist"].shift(1)<=0)
@@ -463,6 +471,13 @@ def compute_confluence(df1: pd.DataFrame, df5: pd.DataFrame) -> dict:
     if close1 > bb_up1: score += 20; detail.append((20,"Phá BB Trên → Breakout UP","#00e676"))
     elif close1 < bb_lo1: score -= 20; detail.append((20,"Phá BB Dưới → Breakdown","#ff5252"))
 
+    ob_bull = safe(df1, "ob_bull", 0); ob_bear = safe(df1, "ob_bear", 0)
+    fvg_bull = safe(df1, "fvg_bull", 0); fvg_bear = safe(df1, "fvg_bear", 0)
+    if ob_bull: score += 25; detail.append((25,"Order Block TĂNG (SMC)","#00e676"))
+    if ob_bear: score -= 25; detail.append((25,"Order Block GIẢM (SMC)","#ff5252"))
+    if fvg_bull: score += 15; detail.append((15,"Fair Value Gap TĂNG (SMC)","#00e676"))
+    if fvg_bear: score -= 15; detail.append((15,"Fair Value Gap GIẢM (SMC)","#ff5252"))
+
     patterns = detect_candle_patterns(df1)
     pat_score = sum(15 if p["bias"]=="BULL" else -15 for p in patterns)
     if pat_score > 0: score += min(pat_score, 15); detail.append((min(pat_score,15), "Mẫu nến TĂNG", "#00e676"))
@@ -557,6 +572,11 @@ def push_alert(score: int, confluence: dict, forecast: dict, price: float, regim
     st.session_state.alert_last_score = score
     st.session_state.alert_history.insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "date": datetime.now().strftime("%d/%m/%Y"), "score": score, "direction": "LONG" if score>0 else "SHORT", "rec": confluence["rec"], "price": price, "regime": regime, "forecast":forecast["verdict"], "up_prob": forecast["up_prob"], "dn_prob": forecast["down_prob"]})
     st.session_state.alert_history = st.session_state.alert_history[:100]
+    
+    # Phát âm thanh khi có cảnh báo mới
+    import streamlit.components.v1 as components
+    audio_url = "https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg" if score > 0 else "https://actions.google.com/sounds/v1/alarms/beep_short.ogg"
+    components.html(f'<audio autoplay><source src="{audio_url}" type="audio/ogg"></audio>', height=0)
 
 def render_alert_banner(score: int, confluence: dict, price: float, muted: bool):
     if abs(score) < ALERT_THRESHOLD: return
@@ -688,8 +708,9 @@ with st.sidebar:
     show_vwap_bands = st.toggle("VWAP Bands (±1σ / ±2σ)", value=True)
     show_patterns   = st.toggle("🕯️ Mẫu nến trên chart", value=True)
 
-    st.markdown('<div class="sec-hdr" style="margin-top:14px">🤖 QUẢN LÝ RỦI RO</div>', unsafe_allow_html=True)
-    lot_size  = st.number_input("Số hợp đồng", min_value=1, max_value=50, value=1)
+    st.markdown('<div class="sec-hdr" style="margin-top:14px">🤖 QUẢN LÝ VỐN & RỦI RO</div>', unsafe_allow_html=True)
+    account_size = st.number_input("Tổng vốn (VNĐ)", min_value=10_000_000, value=100_000_000, step=10_000_000)
+    risk_percent = st.number_input("Rủi ro % mỗi lệnh", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
     auto_sltp = st.toggle("Bot tự tính SL/TP theo ATR", value=True)
     if not auto_sltp:
         tp1_points = st.number_input("TP1 (điểm)", min_value=1.0, max_value=50.0, value=4.0, step=0.5)
@@ -1009,7 +1030,17 @@ with chart_col:
                     "Regime":     t.get("regime", "-"),
                     "Kết quả":    t.get("reason", "-"),
                 } for t in closed_trades]
-                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                df_closed = pd.DataFrame(rows)
+                st.dataframe(df_closed, use_container_width=True, hide_index=True)
+                
+                csv_data = df_closed.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Xuất Lịch sử giao dịch (CSV)",
+                    data=csv_data,
+                    file_name=f"vn30f_trades_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
 
     with tab_alert:
         n_alerts = len(st.session_state.alert_history)
@@ -1043,12 +1074,21 @@ with trade_col:
         st.markdown(f"<div style='background:#0f1626;border:1px dashed #38bdf8;padding:8px;margin-bottom:10px;font-family:JetBrains Mono;font-size:11px'><div style='color:#94a3b8'>ATR: <b style='color:#ffd600'>{current_atr:.1f}đ</b></div><div style='color:#00e676'>TP1 +{calc_tp1:.1f} | TP2 +{calc_tp2:.1f} | TP3 +{calc_tp3:.1f}</div><div style='color:#ff5252'>SL -{calc_sl:.1f}</div></div>", unsafe_allow_html=True)
     else: calc_tp1, calc_tp2, calc_tp3, calc_sl = tp1_points, tp2_points, tp3_points, sl_points
 
+    calc_lot_size = max(1, int((account_size * (risk_percent / 100.0)) / (calc_sl * 100_000)))
+    st.markdown(f"<div style='font-size:11px;color:#00e676;margin-bottom:10px'>Khối lượng tính toán (Risk {risk_percent}%): <b>{calc_lot_size} HĐ</b></div>", unsafe_allow_html=True)
+
     entry_price = st.number_input("Giá vào", value=float(f"{current_price:.2f}"), step=0.1)
+    
+    open_exist = any(t["status"] == "OPEN" for t in st.session_state.trade_history)
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("🟢 LONG", use_container_width=True): add_trade("LONG", entry_price, entry_price+calc_tp1, entry_price+calc_tp2, entry_price+calc_tp3, entry_price-calc_sl, lot_size, score, regime5["regime"], "Bot"); st.rerun()
+        if st.button("🟢 LONG", use_container_width=True, disabled=open_exist): 
+            add_trade("LONG", entry_price, entry_price+calc_tp1, entry_price+calc_tp2, entry_price+calc_tp3, entry_price-calc_sl, calc_lot_size, score, regime5["regime"], "Bot"); st.rerun()
     with c2:
-        if st.button("🔴 SHORT", use_container_width=True): add_trade("SHORT", entry_price, entry_price-calc_tp1, entry_price-calc_tp2, entry_price-calc_tp3, entry_price+calc_sl, lot_size, score, regime5["regime"], "Bot"); st.rerun()
+        if st.button("🔴 SHORT", use_container_width=True, disabled=open_exist): 
+            add_trade("SHORT", entry_price, entry_price-calc_tp1, entry_price-calc_tp2, entry_price-calc_tp3, entry_price+calc_sl, calc_lot_size, score, regime5["regime"], "Bot"); st.rerun()
+    if open_exist:
+        st.markdown("<div style='font-size:10px;color:#ff5252;padding:4px;text-align:center'>⚠️ Đang có lệnh mở. Cấm nhồi thêm lệnh.</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="sec-hdr" style="margin-top:10px">📋 LỆNH ĐANG MỞ</div>', unsafe_allow_html=True)
     open_exist = False
