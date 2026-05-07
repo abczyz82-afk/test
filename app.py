@@ -766,6 +766,124 @@ with chart_col:
     with tab1: st.plotly_chart(build_chart(df1, f"{symbol}·1P", show_ema, show_bb, show_signals, show_trades, show_vwap, show_vwap_bands, show_patterns, score, pattern_history=pat_hist1), use_container_width=True, config={"displayModeBar": False})
     with tab5: st.plotly_chart(build_chart(df5, f"{symbol}·5P", show_ema, show_bb, show_signals, show_trades, show_vwap, show_vwap_bands, show_patterns, score, pattern_history=pat_hist5), use_container_width=True, config={"displayModeBar": False})
     
+    with tab_pat:
+        st.markdown('<div class="sec-hdr">🕯️ MẪU NẾN PHÁT HIỆN HIỆN TẠI & LỊCH SỬ</div>', unsafe_allow_html=True)
+        cur_pats1 = detect_candle_patterns(df1)
+        cur_pats5 = detect_candle_patterns(df5)
+        all_cur   = [(p,"1P") for p in cur_pats1] + [(p,"5P") for p in cur_pats5]
+
+        if all_cur:
+            st.markdown('<div style="font-size:11px;color:#38bdf8;font-family:JetBrains Mono;font-weight:700;margin-bottom:6px">⚡ ĐANG XUẤT HIỆN NGAY BÂY GIỜ</div>', unsafe_allow_html=True)
+            cols_p = st.columns(min(len(all_cur), 4))
+            for idx, (p, tf) in enumerate(all_cur[:4]):
+                bc = {"BULL":"#00e676","BEAR":"#ff5252","NEUTRAL":"#ffd600"}.get(p["bias"],"#64748b")
+                qc = p.get("quality_color","#64748b")
+                cols_p[idx].markdown(f"""
+                <div style="background:#0f1626;border:1px solid {bc}44;border-top:3px solid {bc};
+                     border-radius:8px;padding:10px;font-family:'JetBrains Mono',monospace;font-size:11px">
+                  <div style="color:{bc};font-weight:700;font-size:13px">{p['name']}</div>
+                  <div style="color:#64748b;margin-top:3px">[{tf}] {p['desc']}</div>
+                  <div style="display:flex;justify-content:space-between;margin-top:6px">
+                    <span style="color:{qc};font-weight:700">Chất lượng {p['quality']}</span>
+                    <span style="color:#f1f5f9">{p['reliability']}%</span>
+                  </div>
+                  <div style="background:#1a2540;border-radius:3px;height:6px;margin-top:4px">
+                    <div style="height:6px;border-radius:3px;width:{p['reliability']}%;background:{qc}"></div>
+                  </div>
+                  {'<div style="font-size:10px;color:#38bdf8;margin-top:3px">+' + str(p["context_bonus"]) + '% (vùng key)</div>' if p.get("context_bonus",0)>0 else ""}
+                </div>""", unsafe_allow_html=True)
+        else:
+            st.markdown('<div style="color:#334155;font-family:JetBrains Mono;font-size:11px;padding:8px">Không có mẫu nến đặc biệt ở nến hiện tại.</div>', unsafe_allow_html=True)
+
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+        with st.expander("📖 Bảng tra cứu 17 mẫu nến & độ tin cậy"):
+            pattern_info = [
+                ("Morning Star",        "BULL","82%","Đảo chiều tăng mạnh – 3 nến: đỏ lớn → nhỏ → xanh lớn"),
+                ("Evening Star",        "BEAR","80%","Đảo chiều giảm mạnh – 3 nến: xanh lớn → nhỏ → đỏ lớn"),
+                ("Three White Soldiers","BULL","78%","3 nến xanh thân đầy liên tiếp – trend tăng xác nhận"),
+                ("Three Black Crows",   "BEAR","77%","3 nến đỏ thân đầy liên tiếp – trend giảm xác nhận"),
+                ("Bull Engulfing",      "BULL","75%","Nến xanh nuốt toàn bộ thân nến đỏ trước"),
+                ("Bear Engulfing",      "BEAR","74%","Nến đỏ nuốt toàn bộ thân nến xanh trước"),
+                ("Marubozu Bull",       "BULL","72%","Nến xanh thân đầy không râu – lực mua tuyệt đối"),
+                ("Marubozu Bear",       "BEAR","71%","Nến đỏ thân đầy không râu – lực bán tuyệt đối"),
+                ("Piercing Line",       "BULL","68%","Xanh mở dưới đáy đỏ, đóng trên ½ thân đỏ"),
+                ("Dark Cloud Cover",    "BEAR","67%","Đỏ mở trên đỉnh xanh, đóng dưới ½ thân xanh"),
+                ("Hammer",             "BULL","65%","Râu dưới dài ≥ 2× thân – hỗ trợ mạnh"),
+                ("Shooting Star",      "BEAR","64%","Râu trên dài ≥ 2× thân – kháng cự mạnh"),
+                ("Tweezer Bottom",     "BULL","63%","Hai nến chạm cùng đáy – double bottom nhỏ"),
+                ("Tweezer Top",        "BEAR","62%","Hai nến chạm cùng đỉnh – double top nhỏ"),
+                ("Bullish Harami",     "BULL","60%","Xanh nhỏ trong bụng đỏ lớn – tín hiệu yếu hơn"),
+                ("Bearish Harami",     "BEAR","59%","Đỏ nhỏ trong bụng xanh lớn – tín hiệu yếu hơn"),
+                ("Doji",              "NEUTRAL","55%","Mở = Đóng – giằng co hoàn toàn, sắp đảo chiều"),
+            ]
+            rows_pi = [{"Tên mẫu":n,"Xu hướng":b,"Cơ bản":r,"Mô tả":d} for n,b,r,d in pattern_info]
+            st.dataframe(pd.DataFrame(rows_pi), use_container_width=True, hide_index=True)
+            st.markdown("""
+            <div style="background:#0f1626;border:1px solid #1a2540;border-radius:8px;padding:12px;margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:11px;color:#64748b">
+              <b style="color:#38bdf8">💡 Context Bonus – Độ tin cậy tăng thêm khi:</b><br>
+              +12% Mẫu xuất hiện tại BB Lower/Upper (vùng hỗ trợ/kháng cự)<br>
+              +10% Mẫu xuất hiện tại VWAP ±2σ (vùng extreme)<br>
+              +8%  Volume đột biến > 1.5× MA đi kèm<br>
+              +5%  BB Squeeze đang hình thành (sắp breakout)
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        st.markdown('<div class="sec-hdr">LỊCH SỬ MẪU NẾN (120 nến gần nhất)</div>', unsafe_allow_html=True)
+
+        fp1, fp2, fp3 = st.columns(3)
+        filter_tf_p  = fp1.selectbox("Khung",   ["Tất cả","1P","5P"],    key="pf_tf")
+        filter_bias_p= fp2.selectbox("Xu hướng",["Tất cả","BULL","BEAR","NEUTRAL"], key="pf_bias")
+        filter_ql_p  = fp3.selectbox("Chất lượng",["Tất cả","A","B","C"], key="pf_ql")
+
+        combined = [(p,"1P") for p in pat_hist1] + [(p,"5P") for p in pat_hist5]
+        combined.sort(key=lambda x: x[0]["time"], reverse=True)
+
+        filtered_p = [
+            (p, tf) for p, tf in combined
+            if (filter_tf_p  == "Tất cả" or tf == filter_tf_p)
+            and (filter_bias_p == "Tất cả" or p["bias"] == filter_bias_p)
+            and (filter_ql_p  == "Tất cả" or p["quality"] == filter_ql_p)
+        ]
+
+        n_bull_h = sum(1 for p,_ in filtered_p if p["bias"]=="BULL")
+        n_bear_h = sum(1 for p,_ in filtered_p if p["bias"]=="BEAR")
+        n_a_h    = sum(1 for p,_ in filtered_p if p["quality"]=="A")
+        st.markdown(f"""
+        <div style="display:flex;gap:8px;margin-bottom:10px;font-family:'JetBrains Mono',monospace;font-size:11px;flex-wrap:wrap">
+          <div style="background:#0a1f12;border:1px solid #00e67633;border-radius:5px;padding:5px 10px;color:#00e676">🟢 BULL: {n_bull_h}</div>
+          <div style="background:#1f0a0a;border:1px solid #ff525233;border-radius:5px;padding:5px 10px;color:#ff5252">🔴 BEAR: {n_bear_h}</div>
+          <div style="background:#051a0d;border:1px solid #00e67666;border-radius:5px;padding:5px 10px;color:#00e676">⭐ Chất lượng A: {n_a_h}</div>
+          <div style="background:#0f1626;border:1px solid #1a2540;border-radius:5px;padding:5px 10px;color:#64748b">Tổng: {len(filtered_p)}</div>
+        </div>""", unsafe_allow_html=True)
+
+        if not filtered_p:
+            st.markdown('<div style="color:#334155;font-family:JetBrains Mono;font-size:11px;padding:8px">Không có mẫu khớp bộ lọc.</div>', unsafe_allow_html=True)
+        else:
+            for p, tf in filtered_p[:60]:
+                bc  = {"BULL":"#00e676","BEAR":"#ff5252","NEUTRAL":"#ffd600"}.get(p["bias"],"#64748b")
+                qc  = p.get("quality_color","#64748b")
+                cb_html = f'<span style="color:#38bdf8"> +{p["context_bonus"]}% context</span>' if p.get("context_bonus",0)>0 else ""
+                t_str = p["time"].strftime("%d/%m %H:%M") if hasattr(p["time"],"strftime") else str(p["time"])
+                st.markdown(f"""
+                <div style="background:#0f1626;border:1px solid {bc}33;border-left:3px solid {bc};
+                     border-radius:6px;padding:8px 12px;margin-bottom:4px;
+                     font-family:'JetBrains Mono',monospace;font-size:11px">
+                  <div style="display:flex;justify-content:space-between;align-items:center">
+                    <span><b style="color:{bc}">{p['name']}</b>
+                      <span style="color:#475569"> [{tf}] {t_str}</span></span>
+                    <div style="display:flex;gap:6px;align-items:center">
+                      <span class="{'wr-badge-good' if p['quality']=='A' else 'wr-badge-mid' if p['quality']=='B' else 'wr-badge-bad'}">{p['quality']}</span>
+                      <span style="color:#f1f5f9;font-weight:700">{p['price']:.2f}</span>
+                    </div>
+                  </div>
+                  <div style="color:#64748b;margin-top:2px">{p['desc']}{cb_html}</div>
+                  <div style="background:#1a2540;border-radius:2px;height:4px;margin-top:5px;width:100%">
+                    <div style="height:4px;border-radius:2px;width:{p['reliability']}%;background:{qc}"></div>
+                  </div>
+                  <div style="font-size:9px;color:#334155;margin-top:2px">Độ tin cậy {p['reliability']}%</div>
+                </div>""", unsafe_allow_html=True)
+
     with tab_sig:
         st.markdown('<div class="sec-hdr">LỊCH SỬ GIAO CẮT TÍN HIỆU</div>', unsafe_allow_html=True)
         h1m = get_signal_history(df1, "1P"); h5m = get_signal_history(df5, "5P")
@@ -777,16 +895,146 @@ with chart_col:
             st.info("Chưa có tín hiệu giao cắt.")
 
     with tab_wr:
-        st.markdown('<div class="sec-hdr">📊 WIN RATE & HIỆU SUẤT</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sec-hdr">📊 WIN RATE & HIỆU SUẤT TOÀN DIỆN</div>', unsafe_allow_html=True)
         wr = compute_winrate()
-        if wr["total"] > 0:
-            w1, w2, w3 = st.columns(3)
-            w1.markdown(f'<div class="metric-box"><div class="metric-label">Win Rate</div><div class="metric-value">{(wr["wins"]/wr["total"]*100):.1f}%</div></div>', unsafe_allow_html=True)
-            w2.markdown(f'<div class="metric-box"><div class="metric-label">Profit Factor</div><div class="metric-value">{wr["profit_factor"]:.2f}</div></div>', unsafe_allow_html=True)
-            w3.markdown(f'<div class="metric-box"><div class="metric-label">Tổng P&L</div><div class="metric-value">{wr["total_pnl"]:+.1f}đ</div></div>', unsafe_allow_html=True)
-        else: st.info("Chưa có lệnh đóng.")
 
-    with tab_alert: render_alert_history()
+        if wr["total"] == 0:
+            st.info("Chưa có lệnh đóng. Hãy vào lệnh và để hệ thống tự chốt lời/cắt lỗ.")
+        else:
+            w1, w2, w3, w4 = st.columns(4)
+            wrc = "#00e676" if wr["win_rate"] >= 55 else ("#ffd600" if wr["win_rate"] >= 45 else "#ff5252")
+            w1.markdown(f'<div class="metric-box"><div class="metric-label">Win Rate</div><div class="metric-value" style="color:{wrc}">{wr["win_rate"]:.1f}%</div><div style="font-size:10px;color:#475569">✅{wr["wins"]} / ❌{wr["losses"]}</div></div>', unsafe_allow_html=True)
+            pfc = "#00e676" if wr["profit_factor"] > 1.5 else ("#ffd600" if wr["profit_factor"] > 1 else "#ff5252")
+            w2.markdown(f'<div class="metric-box"><div class="metric-label">Profit Factor</div><div class="metric-value" style="color:{pfc}">{wr["profit_factor"]:.2f}</div><div style="font-size:10px;color:#475569">> 1.5 = tốt</div></div>', unsafe_allow_html=True)
+            exc = "#00e676" if wr["expectancy"] > 0 else "#ff5252"
+            w3.markdown(f'<div class="metric-box"><div class="metric-label">Expectancy</div><div class="metric-value" style="color:{exc}">{wr["expectancy"]:+.2f}đ</div><div style="font-size:10px;color:#475569">kỳ vọng/lệnh</div></div>', unsafe_allow_html=True)
+            tc = "#00e676" if wr["total_pnl"] > 0 else "#ff5252"
+            w4.markdown(f'<div class="metric-box"><div class="metric-label">Tổng P&L</div><div class="metric-value" style="color:{tc}">{wr["total_pnl"]:+.1f}đ</div><div style="font-size:10px;color:#475569">{wr["total"]} lệnh</div></div>', unsafe_allow_html=True)
+
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+            if wr["equity_curve"]:
+                eq_df  = pd.DataFrame(wr["equity_curve"])
+                eq_col = ["#00e676" if v >= 0 else "#ff5252" for v in eq_df["eq"]]
+                fig_eq = go.Figure()
+                fig_eq.add_trace(go.Scatter(
+                    x=eq_df["label"], y=eq_df["eq"],
+                    fill="tozeroy",
+                    fillcolor="rgba(0,230,118,0.08)",
+                    line=dict(color="#00e676", width=2),
+                    mode="lines+markers",
+                    marker=dict(color=eq_col, size=7),
+                    name="Equity",
+                ))
+                fig_eq.add_hline(y=0, line_color="#334155", line_width=1)
+                fig_eq.update_layout(
+                    template="plotly_dark", paper_bgcolor="#080c18", plot_bgcolor="#080c18",
+                    margin=dict(l=0,r=0,t=28,b=0), height=200,
+                    title=dict(text="📈 Đường vốn (Equity Curve)", font=dict(size=11, color="#475569"), x=0.01),
+                    xaxis=dict(gridcolor="#1a2540", showgrid=True),
+                    yaxis=dict(gridcolor="#1a2540", showgrid=True),
+                    showlegend=False,
+                )
+                st.plotly_chart(fig_eq, use_container_width=True, config={"displayModeBar": False})
+
+            col_r, col_d, col_s = st.columns(3)
+
+            def breakdown_table(title, data: dict):
+                html = f'<div style="background:#0f1626;border:1px solid #1a2540;border-radius:8px;padding:12px;font-family:JetBrains Mono;font-size:11px"><div style="color:#38bdf8;font-weight:700;margin-bottom:8px">{title}</div>'
+                for k, v in data.items():
+                    wr_ = v.get("wr", 0)
+                    wr_c = "#00e676" if wr_ >= 55 else ("#ffd600" if wr_ >= 45 else "#ff5252")
+                    pnl_ = v.get("pnl", 0)
+                    pc   = "#00e676" if pnl_ >= 0 else "#ff5252"
+                    html += f"""
+                    <div class="wr-row">
+                      <span style="color:#94a3b8">{k}</span>
+                      <div style="display:flex;gap:8px;align-items:center">
+                        <span class="{'wr-badge-good' if wr_>=55 else 'wr-badge-mid' if wr_>=45 else 'wr-badge-bad'}">{wr_:.0f}%</span>
+                        <span style="color:{pc}">{pnl_:+.1f}đ</span>
+                        <span style="color:#475569">{v['total']}L</span>
+                      </div>
+                    </div>"""
+                html += "</div>"
+                return html
+
+            with col_r:
+                if wr["by_regime"]:
+                    st.markdown(breakdown_table("📍 Theo Regime", wr["by_regime"]), unsafe_allow_html=True)
+                else:
+                    st.markdown('<div style="color:#334155;font-size:11px;font-family:JetBrains Mono;padding:8px">Chưa có dữ liệu Regime</div>', unsafe_allow_html=True)
+
+            with col_d:
+                if wr["by_direction"]:
+                    st.markdown(breakdown_table("↕️ Theo Hướng", wr["by_direction"]), unsafe_allow_html=True)
+                else:
+                    st.markdown('<div style="color:#334155;font-size:11px;font-family:JetBrains Mono;padding:8px">Chưa có dữ liệu hướng</div>', unsafe_allow_html=True)
+
+            with col_s:
+                if wr["by_signal"]:
+                    st.markdown(breakdown_table("⚡ Theo Mức Score", wr["by_signal"]), unsafe_allow_html=True)
+                else:
+                    st.markdown('<div style="color:#334155;font-size:11px;font-family:JetBrains Mono;padding:8px">Chưa có dữ liệu Score</div>', unsafe_allow_html=True)
+
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+            dd_c  = "#ff5252" if wr["max_drawdown"] > 5 else ("#ffd600" if wr["max_drawdown"] > 2 else "#00e676")
+            cl_c  = "#ff5252" if wr["consecutive_losses"] >= 4 else ("#ffd600" if wr["consecutive_losses"] >= 2 else "#00e676")
+            health = "✅ Chiến lược đang hoạt động tốt." if wr["expectancy"] > 0 and wr["profit_factor"] > 1.2 else "⚠️ Cần xem xét lại SL/TP hoặc lọc điều kiện vào lệnh."
+            st.markdown(f"""
+            <div style="background:#0f1626;border:1px solid #1a2540;border-radius:8px;padding:12px;font-family:'JetBrains Mono',monospace;font-size:11px">
+              <div style="color:#38bdf8;font-weight:700;margin-bottom:8px">🔍 PHÂN TÍCH NÂNG CAO</div>
+              <div style="display:flex;gap:20px;flex-wrap:wrap">
+                <span>Avg Thắng: <b style="color:#00e676">{wr['avg_win']:+.2f}đ</b></span>
+                <span>Avg Thua: <b style="color:#ff5252">{wr['avg_loss']:+.2f}đ</b></span>
+                <span>Max Drawdown: <b style="color:{dd_c}">{wr['max_drawdown']:.2f}đ</b></span>
+                <span>Chuỗi thua tối đa: <b style="color:{cl_c}">{wr['consecutive_losses']} lệnh</b></span>
+              </div>
+              <div style="color:#64748b;margin-top:8px">{health}</div>
+            </div>""", unsafe_allow_html=True)
+
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+            st.markdown('<div class="sec-hdr">LỊCH SỬ LỆNH ĐÃ ĐÓNG</div>', unsafe_allow_html=True)
+            closed_trades = [t for t in st.session_state.trade_history if t["status"] == "CLOSED"]
+            if closed_trades:
+                rows = [{
+                    "#":          t["id"],
+                    "Lệnh":       "🟢 LONG" if t["direction"] == "LONG" else "🔴 SHORT",
+                    "Vào":        f"{t['date']} {t['time']}",
+                    "Ra":         t.get("exit_time", "-"),
+                    "Entry":      f"{t['entry']:.2f}",
+                    "Exit":       f"{t.get('exit_price', 0):.2f}",
+                    "P&L":        f"{t.get('pnl_points', 0):+.1f}đ",
+                    "Score":      f"{t.get('score', 0):+d}",
+                    "Regime":     t.get("regime", "-"),
+                    "Kết quả":    t.get("reason", "-"),
+                } for t in closed_trades]
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    with tab_alert:
+        n_alerts = len(st.session_state.alert_history)
+        st.markdown(f'<div class="sec-hdr">🚨 LỊCH SỬ CẢNH BÁO  ·  {n_alerts} cảnh báo  ·  Ngưỡng: |Score| ≥ {{ALERT_THRESHOLD}}</div>', unsafe_allow_html=True)
+
+        long_alerts  = sum(1 for a in st.session_state.alert_history if a["direction"] == "LONG")
+        short_alerts = sum(1 for a in st.session_state.alert_history if a["direction"] == "SHORT")
+        st.markdown(f"""
+        <div style="display:flex;gap:8px;margin-bottom:12px;font-family:'JetBrains Mono',monospace;font-size:11px">
+          <div style="background:#0a1f12;border:1px solid #00e67633;border-radius:5px;padding:6px 12px;color:#00e676">🚀 LONG Alert: {long_alerts}</div>
+          <div style="background:#1f0a0a;border:1px solid #ff525233;border-radius:5px;padding:6px 12px;color:#ff5252">💥 SHORT Alert: {short_alerts}</div>
+          <div style="background:#0f1626;border:1px solid #1a2540;border-radius:5px;padding:6px 12px;color:#64748b">Score hiện tại: <b style="color:{'#00e676' if score>0 else '#ff5252'}">{score:+d}</b></div>
+        </div>""", unsafe_allow_html=True)
+
+        render_alert_history()
+
+        st.markdown(f"""
+        <div style="background:#0f1626;border:1px solid #1a2540;border-radius:8px;padding:12px;margin-top:12px;font-family:'JetBrains Mono',monospace;font-size:11px;color:#475569">
+          <b style="color:#38bdf8">💡 Cách sử dụng cảnh báo:</b><br>
+          • Score ≥ +{{ALERT_THRESHOLD}} → Banner đỏ xanh xuất hiện → Cân nhắc vào LONG<br>
+          • Score ≤ -{{ALERT_THRESHOLD}} → Banner đỏ xuất hiện → Cân nhắc vào SHORT<br>
+          • Kết hợp với Forecast và Regime trước khi vào lệnh<br>
+          • Điều chỉnh ngưỡng trong Sidebar để lọc tín hiệu<br>
+          • Tắt banner bằng toggle "🔕 Tắt banner cảnh báo"
+        </div>""", unsafe_allow_html=True)
 
 with trade_col:
     st.markdown('<div class="sec-hdr">🔫 VÀO LỆNH & QUẢN LÝ</div>', unsafe_allow_html=True)
@@ -803,22 +1051,76 @@ with trade_col:
         if st.button("🔴 SHORT", use_container_width=True): add_trade("SHORT", entry_price, entry_price-calc_tp1, entry_price-calc_tp2, entry_price-calc_tp3, entry_price+calc_sl, lot_size, score, regime5["regime"], "Bot"); st.rerun()
 
     st.markdown('<div class="sec-hdr" style="margin-top:10px">📋 LỆNH ĐANG MỞ</div>', unsafe_allow_html=True)
+    open_exist = False
     for i, t in enumerate(st.session_state.trade_history):
         if t["status"] == "OPEN":
+            open_exist = True
             live = (current_price-t["entry"]) * (1 if t["direction"]=="LONG" else -1)
-            st.markdown(f"<div style='background:#0f1626;border:1px solid #1a2540;padding:8px;font-size:10px'><b style='color:{'#00e676' if t['direction']=='LONG' else '#ff5252'}'>#{t['id']} {t['direction']}</b><br><span style='color:#64748b'>Entry: {t['entry']} | Live P&L: {live:+.1f}</span></div>", unsafe_allow_html=True)
+            dc   = "#00e676" if t["direction"]=="LONG" else "#ff5252"
+            lc   = "#00e676" if live>=0 else "#ff5252"
+            st.markdown(f"""
+            <div style="background:#0f1626;border:1px solid #1a2540;border-left:2px solid {dc};padding:8px;margin-bottom:5px;font-size:10px;font-family:'JetBrains Mono'">
+              <b style="color:{dc}">#{t['id']} {t['direction']}</b>
+              <span style="float:right;color:#ffd600">OPEN</span><br>
+              <span style="color:#64748b">In: {t['entry']:.2f} | P&L: <span style="color:{lc}">{live:+.2f}</span></span><br>
+              <span style="color:#475569">TP {t['tp1']:.1f}/{t['tp2']:.1f}/{t['tp3']:.1f} | SL <span style="color:#ff5252">{t['sl']:.1f}</span></span>
+            </div>""", unsafe_allow_html=True)
             if st.button(f"✕ Đóng #{t['id']}", key=f"cl_{i}"): close_trade(i, current_price); st.rerun()
+    if not open_exist:
+        st.markdown('<div style="color:#334155;font-size:11px;font-family:JetBrains Mono;padding:6px">Không có lệnh mở.</div>', unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════
+# ██ BẢNG TIÊU CHÍ & THỰC TẾ
+# ══════════════════════════════════════════════════════════════
+st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+with st.expander("📐 BẢNG TIÊU CHÍ XU HƯỚNG & TÍNH TOÁN THỰC TẾ (5P)"):
+    cl, cr = st.columns(2)
+    with cl:
+        st.markdown("""
+        <div style='background:#0f1626;border:1px solid #1a2540;border-radius:8px;padding:12px;font-family:JetBrains Mono;font-size:12px'>
+          <div style='color:#38bdf8;font-weight:bold;margin-bottom:8px'>📌 BẢNG TIÊU CHÍ</div>
+          <span style='color:#ffd600'>ADX < 22</span> ➔ SIDEWAY<br>
+          <span style='color:#00e676'>ADX ≥ 22 + DI+ > DI-</span> ➔ UPTREND<br>
+          <span style='color:#ff5252'>ADX ≥ 22 + DI- > DI+</span> ➔ DOWNTREND<br><br>
+          <span style='color:#a78bfa'>BB Width < Percentile 15%</span> ➔ BB Squeeze<br>
+          <span style='color:#38bdf8'>Score ≥ +70</span> ➔ KHUYẾN NGHỊ LONG MẠNH<br>
+          <span style='color:#f97316'>Score ≤ -70</span> ➔ KHUYẾN NGHỊ SHORT MẠNH<br>
+        </div>""", unsafe_allow_html=True)
+    with cr:
+        r5 = regime5
+        adx_text = (f"<span style='color:#ffd600'>ADX={r5['adx']:.1f}<22 ➔ SIDEWAY</span>" if r5["adx"]<22
+                    else (f"<span style='color:#00e676'>ADX={r5['adx']:.1f}≥22 & DI+>DI- ➔ UP</span>" if r5["di_pos"]>r5["di_neg"]
+                          else f"<span style='color:#ff5252'>ADX={r5['adx']:.1f}≥22 & DI->DI+ ➔ DOWN</span>"))
+        bb_text = (f"<span style='color:#a78bfa'>BB({r5['bb_w']:.4f})<p15({r5.get('sqz_thresh',0):.4f}) → SQUEEZE</span>" if r5["is_sqz"]
+                   else f"<span style='color:#475569'>BB({r5['bb_w']:.4f})≥p15({r5.get('sqz_thresh',0):.4f}) → Biên độ mở</span>")
+        st.markdown(f"""
+        <div style='background:#0f1626;border:1px solid #1a2540;border-radius:8px;padding:12px;font-family:JetBrains Mono;font-size:12px'>
+          <div style='color:#38bdf8;font-weight:bold;margin-bottom:8px'>⚙️ TÍNH TOÁN 5P HIỆN TẠI</div>
+          • {adx_text}<br>
+          • DI+={r5['di_pos']:.1f} | DI-={r5['di_neg']:.1f}<br>
+          • {bb_text}<br>
+          <hr style='border-color:#1a2540;margin:6px 0'>
+          • Divergence 1P: <b>{'CÓ ▲' if confluence.get('div1',{}).get('bull',False) else ('CÓ ▼' if confluence.get('div1',{}).get('bear',False) else 'KHÔNG')}</b><br>
+          • Volume Bias: <b style='color:{"#00e676" if confluence.get("va",{}).get("bias")=="BULL" else "#ff5252" if confluence.get("va",{}).get("bias")=="BEAR" else "#64748b"}'>{confluence.get("va",{}).get("bias", "NEUTRAL")}</b><br>
+          • Score: <b style='color:{"#00e676" if score>0 else "#ff5252"}'>{score:+d}</b> → {confluence.get('rec','')}
+        </div>""", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════
 # FOOTER + AUTO REFRESH
 # ══════════════════════════════════════════════════════════════
 st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 fl, fr = st.columns([4,1])
-data_src_label = f"📡 {src1}"
-fl.markdown(f'<div style="font-size:10px;color:#475569;font-family:JetBrains Mono">VN30F Terminal v4 · Trạng thái: <span style="color:#00e676">{data_src_label}</span> · {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}</div>', unsafe_allow_html=True)
+_src_label = f"📡 {src1}"
+_hrs_label = " · ● Đang GD" if is_trading_hours() else " · ○ Ngoài giờ"
+fl.markdown(
+    f'<div style="font-size:10px;color:#475569;font-family:JetBrains Mono">'
+    f'VN30F Terminal v4 · Trạng thái: <span style="color:#00e676">{_src_label}</span>{_hrs_label} · '
+    f'{datetime.now().strftime("%d/%m/%Y %H:%M:%S")}</div>',
+    unsafe_allow_html=True
+)
 if auto_refresh:
     rem = max(0, refresh_sec-(datetime.now()-st.session_state.last_refresh).seconds)
     fr.markdown(f'<div style="font-size:10px;color:#38bdf8;font-family:JetBrains Mono;text-align:right">🔄 {rem}s</div>', unsafe_allow_html=True)
     if (datetime.now()-st.session_state.last_refresh).seconds >= refresh_sec:
         st.session_state.last_refresh = datetime.now()
-        st.rerun()
+    time.sleep(1); st.rerun()
