@@ -92,7 +92,12 @@ def load_journal():
 
 def save_journal():
     with open(JOURNAL_FILE, "w", encoding="utf-8") as f:
-        json.dump({"trade_history": st.session_state.trade_history, "ai_journal": st.session_state.ai_journal}, f, ensure_ascii=False, indent=2)
+        json.dump({
+            "trade_history":   st.session_state.trade_history,
+            "ai_journal":      st.session_state.ai_journal,
+            "broker_history":  st.session_state.get("broker_history", []),
+            "session_summaries": st.session_state.get("session_summaries", []),
+        }, f, ensure_ascii=False, indent=2)
 
 journal_data = load_journal()
 
@@ -102,9 +107,11 @@ for k, v in {
     "last_refresh":     datetime.now(),
     "signal_history":   [],
     "prev_sig_keys":    set(),
-    "alert_history":    [],          
-    "alert_last_score": 0,           
-    "alert_muted":      False,       
+    "alert_history":    [],
+    "alert_last_score": 0,
+    "alert_muted":      False,
+    "broker_history":   journal_data.get("broker_history", []),
+    "session_summaries": journal_data.get("session_summaries", []),
 }.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -686,29 +693,106 @@ def compute_broker_advice(df1, df5, score, confluence, forecast, regime1, regime
         if vwap_pct > 1.5:   notes.append(f"Giá đã cách VWAP +{vwap_pct:.1f}% — buy pressure đang thống trị, nhưng không nên duổi mua xa VWAP quá.")
         elif vwap_pct < -1.5: notes.append(f"Giá đã cách VWAP {vwap_pct:.1f}% — sell pressure đang thống trị, thường sẽ có phúc hồi về VWAP.")
 
-    # SL/TP khuyến nghị
-    r2r = 2.0 if adx5 > 30 else 1.5
+
+    # SL / TP1 / TP2 / TP3
     if "LONG" in rec_action:
         sugg_sl  = round(nearest_sup - atr * 0.3, 1)
-        sugg_tp  = round(current_price + (current_price - sugg_sl) * r2r, 1)
+        sl_dist  = max(current_price - sugg_sl, atr * 0.5)
+        sugg_tp1 = round(current_price + sl_dist * 1.0, 1)
+        sugg_tp2 = round(current_price + sl_dist * 2.0, 1)
+        sugg_tp3 = round(current_price + sl_dist * (3.0 if adx5 > 30 else 2.5), 1)
     elif "SHORT" in rec_action:
         sugg_sl  = round(nearest_res + atr * 0.3, 1)
-        sugg_tp  = round(current_price - (sugg_sl - current_price) * r2r, 1)
+        sl_dist  = max(sugg_sl - current_price, atr * 0.5)
+        sugg_tp1 = round(current_price - sl_dist * 1.0, 1)
+        sugg_tp2 = round(current_price - sl_dist * 2.0, 1)
+        sugg_tp3 = round(current_price - sl_dist * (3.0 if adx5 > 30 else 2.5), 1)
     else:
-        sugg_sl = round(current_price - atr * 1.2, 1)
-        sugg_tp = round(current_price + atr * 2.0, 1)
+        sugg_sl  = round(current_price - atr * 1.2, 1)
+        sugg_tp1 = round(current_price + atr * 1.0, 1)
+        sugg_tp2 = round(current_price + atr * 2.0, 1)
+        sugg_tp3 = round(current_price + atr * 3.0, 1)
 
     return {
         "phase": phase, "phase_desc": phase_desc,
         "rec_action": rec_action, "rec_color": rec_color, "conviction": conviction,
         "key_levels": key_levels[:6],
         "nearest_res": nearest_res, "nearest_sup": nearest_sup,
-        "mm_signals": mm_signals,
-        "notes": notes,
-        "sugg_sl": sugg_sl, "sugg_tp": sugg_tp, "r2r": r2r,
+        "mm_signals": mm_signals, "notes": notes,
+        "sugg_sl": sugg_sl, "sugg_tp1": sugg_tp1, "sugg_tp2": sugg_tp2, "sugg_tp3": sugg_tp3,
+        "entry": current_price, "time_str": datetime.now().strftime("%d/%m %H:%M"),
     }
 
+
+
+def compute_session_summary(df1: pd.DataFrame) -> list:
+    """Tổng kết phiên sáng (8:45-11:30) và phiên chiều (13:00-14:45) mỗi ngày."""
+    summaries = []
+    now = datetime.now()
+    today = now.date()
+
+    for session_name, s_start, s_end in [
+        ("☀️ Phiên Sáng", dt_time(8, 45), dt_time(11, 30)),
+        ("🌇 Phiên Chiều", dt_time(13, 0), dt_time(14, 45)),
+    ]:
+        # Chỉ tổng kết khi phiên đã kết thúc
+        if now.time() < s_end:
+            continue
+        # Lọc dữ liệu trong khung phiên hôm nay
+        mask = (
+            (df1.index.date == today) &
+            (df1.index.time >= s_start) &
+            (df1.index.time <= s_end)
+        )
+        sess_df = df1[mask]
+        if len(sess_df) < 3:
+            continue
+
+        s_open   = float(sess_df["open"].iloc[0])
+        s_close  = float(sess_df["close"].iloc[-1])
+        s_high   = float(sess_df["high"].max())
+        s_low    = float(sess_df["low"].min())
+        s_vol    = int(sess_df["volume"].sum())
+        s_change = s_close - s_open
+        s_adx    = float(sess_df["adx"].iloc[-1]) if "adx" in sess_df.columns else 0
+        s_rsi    = float(sess_df["rsi"].iloc[-1]) if "rsi" in sess_df.columns else 50
+        vol_ma_v = float(sess_df["vol_ma"].mean()) if "vol_ma" in sess_df.columns else 1
+
+        # Đếm anomaly trong phiên
+        anom_count = sum(
+            1 for _, r in sess_df.iterrows()
+            if abs(r["close"] - r["open"]) > 2.0 and r["volume"] > vol_ma_v * 1.6
+        )
+
+        # Nhận định
+        bias = "TĂNG" if s_change > 0 else "GIẢM"
+        bias_clr = "#00e676" if s_change > 0 else "#ff5252"
+        if abs(s_change) < 1.0:
+            tone = "đi ngang, ít biến động"
+        elif s_adx > 30:
+            tone = f"xu hướng {bias} rõ ràng (ADX {s_adx:.0f})"
+        else:
+            tone = f"{bias} nhẹ, sideway"
+
+        if s_rsi > 70:
+            rsi_note = "RSI vùng quá mua khi kết thúc — cẩn thận điều chỉnh phiên sau."
+        elif s_rsi < 30:
+            rsi_note = "RSI vùng quá bán khi kết thúc — cơ hội phục hồi phiên sau."
+        else:
+            rsi_note = f"RSI {s_rsi:.0f} vùng trung tính."
+
+        summaries.append({
+            "session": session_name,
+            "open": s_open, "close": s_close, "high": s_high, "low": s_low,
+            "change": s_change, "volume": s_vol, "adx": s_adx, "rsi": s_rsi,
+            "tone": tone, "rsi_note": rsi_note, "anom_count": anom_count,
+            "bias_clr": bias_clr,
+        })
+    return summaries
+
+
 def backtest_ai(df: pd.DataFrame, atr_sl_mult=1.0) -> tuple:
+
     trades_ai1 = []
     trades_ai2 = []
     
@@ -1654,12 +1738,29 @@ with st.expander("📐 BẢNG TIÊU CHÍ XU HƯỚNG & TÍNH TOÁN THỰC TẾ (
             rec_icon = "🟢" if "LONG" in broker["rec_action"] else ("🔴" if "SHORT" in broker["rec_action"] else "⏸️")
             st.markdown(f"""
             <div style="background:{rec_bg};border:2px solid {rc};border-radius:12px;padding:18px 20px;margin-bottom:12px;font-family:'JetBrains Mono',monospace">
-              <div style="font-size:11px;color:#475569;letter-spacing:2px;margin-bottom:6px">PHÁN QUYẾT KHUYẾN NGHỊ</div>
-              <div style="font-size:24px;font-weight:800;color:{rc};margin-bottom:10px">{rec_icon} {broker['rec_action']}</div>
-              <div style="display:flex;gap:16px;margin-bottom:12px;font-size:11px">
-                <div><span style="color:#475569">Entry đề xuất</span><br><b style="color:#f1f5f9;font-size:14px">{current_price:.2f}</b></div>
-                <div><span style="color:#475569">SL gợi ý</span><br><b style="color:#ff5252;font-size:14px">{broker['sugg_sl']:.1f}</b></div>
-                <div><span style="color:#475569">TP gợi ý (R{broker['r2r']:.0f}R)</span><br><b style="color:#00e676;font-size:14px">{broker['sugg_tp']:.1f}</b></div>
+              <div style="font-size:11px;color:#475569;letter-spacing:2px;margin-bottom:6px">PHÁN QUYẾT KHUYẾN NGHỊ · {broker['time_str']}</div>
+              <div style="font-size:24px;font-weight:800;color:{rc};margin-bottom:12px">{rec_icon} {broker['rec_action']}</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;font-size:11px">
+                <div style="background:#0a0f1e;border-radius:6px;padding:8px">
+                  <div style="color:#475569;margin-bottom:2px">Entry đề xuất</div>
+                  <div style="color:#f1f5f9;font-size:15px;font-weight:700">{broker['entry']:.2f}</div>
+                </div>
+                <div style="background:#0a0f1e;border-radius:6px;padding:8px;border:1px solid #ff525244">
+                  <div style="color:#475569;margin-bottom:2px">SL cắt lỗ</div>
+                  <div style="color:#ff5252;font-size:15px;font-weight:700">{broker['sugg_sl']:.1f}</div>
+                </div>
+                <div style="background:#0a0f1e;border-radius:6px;padding:8px;border:1px solid #00e67633">
+                  <div style="color:#475569;margin-bottom:2px">TP1 (R1R)</div>
+                  <div style="color:#00e676;font-size:14px;font-weight:700">{broker['sugg_tp1']:.1f}</div>
+                </div>
+                <div style="background:#0a0f1e;border-radius:6px;padding:8px;border:1px solid #00e67655">
+                  <div style="color:#475569;margin-bottom:2px">TP2 (R2R)</div>
+                  <div style="color:#00e676;font-size:15px;font-weight:700">{broker['sugg_tp2']:.1f}</div>
+                </div>
+                <div style="background:#0a0f1e;border-radius:6px;padding:8px;border:1px solid #00e67677;grid-column:span 2">
+                  <div style="color:#475569;margin-bottom:2px">TP3 (Sóng lớn / Trailing)</div>
+                  <div style="color:#00e676;font-size:16px;font-weight:800">{broker['sugg_tp3']:.1f}</div>
+                </div>
               </div>
               <div style="background:#1a2540;border-radius:6px;height:10px;margin-bottom:4px">
                 <div style="height:10px;border-radius:6px;width:{cv}%;background:{rc}"></div>
@@ -1736,6 +1837,87 @@ with st.expander("📐 BẢNG TIÊU CHÍ XU HƯỚNG & TÍNH TOÁN THỰC TẾ (
               </div>
             </div>
             """, unsafe_allow_html=True)
+
+        # ── Lưu khuyến nghị vào lịch sử (nếu chưa có trong phút này) ──
+        bh = st.session_state.get("broker_history", [])
+        if not bh or bh[0].get("time_str") != broker["time_str"]:
+            if broker["conviction"] > 0:
+                bh.insert(0, {
+                    "time_str": broker["time_str"],
+                    "rec_action": broker["rec_action"],
+                    "conviction": broker["conviction"],
+                    "entry": broker["entry"],
+                    "sl": broker["sugg_sl"],
+                    "tp1": broker["sugg_tp1"],
+                    "tp2": broker["sugg_tp2"],
+                    "tp3": broker["sugg_tp3"],
+                    "phase": broker["phase"],
+                })
+                st.session_state.broker_history = bh[:50]
+                save_journal()
+
+        # ── Tổng kết phiên ──────────────────────────────────────────
+        sess_sums = compute_session_summary(df1)
+        if sess_sums:
+            st.markdown('<div class="sec-hdr" style="margin-top:16px">📋 TỔNG KẾT PHIÊN GIAO DỊCH HÔM NAY</div>', unsafe_allow_html=True)
+            ss_cols = st.columns(len(sess_sums))
+            for ci, ss in enumerate(sess_sums):
+                clr = ss["bias_clr"]
+                with ss_cols[ci]:
+                    st.markdown(f"""
+                    <div style="background:#0f1626;border:1px solid {clr}44;border-top:3px solid {clr};
+                        border-radius:8px;padding:14px;font-family:'JetBrains Mono',monospace;font-size:11px">
+                      <div style="font-size:14px;font-weight:700;color:{clr};margin-bottom:8px">{ss['session']}</div>
+                      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:8px">
+                        <div><span style="color:#475569">Mở cửa</span><br><b style="color:#f1f5f9">{ss['open']:.1f}</b></div>
+                        <div><span style="color:#475569">Đóng cửa</span><br><b style="color:{clr}">{ss['close']:.1f}</b></div>
+                        <div><span style="color:#475569">Đỉnh</span><br><b style="color:#ff5252">{ss['high']:.1f}</b></div>
+                        <div><span style="color:#475569">Đáy</span><br><b style="color:#00e676">{ss['low']:.1f}</b></div>
+                      </div>
+                      <div style="border-top:1px solid #1a2540;padding-top:8px">
+                        <div>Thay đổi: <b style="color:{clr}">{ss['change']:+.2f}đ</b></div>
+                        <div style="margin-top:3px">KL: <b style="color:#a78bfa">{ss['volume']:,}</b></div>
+                        <div style="margin-top:3px">Anomaly VN30: <b style="color:{'#ffd600' if ss['anom_count']>0 else '#334155'}">{ss['anom_count']} nến</b></div>
+                        <div style="margin-top:6px;color:#64748b">{ss['tone']}</div>
+                        <div style="margin-top:4px;color:#475569;font-size:10px">{ss['rsi_note']}</div>
+                      </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        # ── Lịch sử khuyến nghị của Broker ─────────────────────────
+        bh_data = st.session_state.get("broker_history", [])
+        if bh_data:
+            st.markdown('<div class="sec-hdr" style="margin-top:16px">📖 LỊCH SỬ KHUYẾN NGHỊ BROKER (LƯU VĨNH VIỄN)</div>', unsafe_allow_html=True)
+            hist_html = """<table style="width:100%;border-collapse:collapse;font-family:'JetBrains Mono',monospace;font-size:11px">
+            <thead><tr style="border-bottom:1px solid #1a2540;color:#475569">
+              <th style="padding:5px 8px;text-align:left">Thời gian</th>
+              <th style="padding:5px 8px;text-align:center">Khuyến nghị</th>
+              <th style="padding:5px 8px;text-align:right">Entry</th>
+              <th style="padding:5px 8px;text-align:right">SL</th>
+              <th style="padding:5px 8px;text-align:right">TP1</th>
+              <th style="padding:5px 8px;text-align:right">TP2</th>
+              <th style="padding:5px 8px;text-align:right">TP3</th>
+              <th style="padding:5px 8px;text-align:center">Tin cậy</th>
+            </tr></thead><tbody>"""
+            for h in bh_data[:20]:
+                h_clr = "#00e676" if "LONG" in h.get("rec_action","") else ("#ff5252" if "SHORT" in h.get("rec_action","") else "#ffd600")
+                hist_html += f"""<tr style="border-bottom:1px solid #0f1626">
+                  <td style="padding:5px 8px;color:#64748b">{h.get('time_str','-')}</td>
+                  <td style="padding:5px 8px;text-align:center;color:{h_clr};font-weight:700">{h.get('rec_action','-')}</td>
+                  <td style="padding:5px 8px;text-align:right;color:#f1f5f9">{h.get('entry',0):.1f}</td>
+                  <td style="padding:5px 8px;text-align:right;color:#ff5252">{h.get('sl',0):.1f}</td>
+                  <td style="padding:5px 8px;text-align:right;color:#00e676">{h.get('tp1',0):.1f}</td>
+                  <td style="padding:5px 8px;text-align:right;color:#00e676">{h.get('tp2',0):.1f}</td>
+                  <td style="padding:5px 8px;text-align:right;color:#00e676">{h.get('tp3',0):.1f}</td>
+                  <td style="padding:5px 8px;text-align:center;color:{h_clr}">{h.get('conviction',0)}%</td>
+                </tr>"""
+            hist_html += "</tbody></table>"
+            st.markdown(f'<div style="background:#0f1626;border:1px solid #1a2540;border-radius:8px;padding:10px">{hist_html}</div>', unsafe_allow_html=True)
+            if st.button("🗑️ Xóa lịch sử Broker", use_container_width=False, key="clear_broker_hist"):
+                st.session_state.broker_history = []
+                save_journal()
+                st.rerun()
+
 
 # ══════════════════════════════════════════════════════════════
 # FOOTER + AUTO REFRESH
